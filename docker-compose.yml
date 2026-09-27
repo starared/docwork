@@ -1,0 +1,87 @@
+# DocWork 部署（单机）。所有容器共用 /data（宿主机目录 ${DW_HOST_DATA}）。
+# - web：只监听本机端口，由宿主机上已有的 Nginx 反向代理并签发 HTTPS 证书。
+# - worker-ai：调用模型接口，需要外网。
+# - 重负载 worker（渲染、转换、OCR、预览）：network_mode: none，完全没有网络；根文件系统只读。
+#   它们之间只通过 /data 中的 SQLite 队列协作，全局并发由认领任务时的数据库事务保证。
+x-app: &app
+  image: docwork:latest
+  env_file: .env
+  volumes:
+    - ${DW_HOST_DATA:-/srv/docwork}:/data
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options: { max-size: "10m", max-file: "3" }
+  stop_grace_period: 60s
+
+x-heavy: &heavy
+  <<: *app
+  network_mode: none
+  read_only: true
+  tmpfs:
+    - /tmp:size=256m
+  security_opt:
+    - no-new-privileges:true
+  cap_drop: [ALL]
+
+services:
+  web:
+    <<: *app
+    build: .
+    ports:
+      - "127.0.0.1:${DW_PORT:-8000}:8000"
+    mem_limit: ${MEM_WEB:-1536m}
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  worker-ai:
+    <<: *app
+    command: ["python", "-m", "app.worker", "--queues", "ai"]
+    networks: [default, newapi]
+    mem_limit: ${MEM_AI:-1024m}
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    depends_on: [web]
+
+  worker-render:
+    <<: *heavy
+    command: ["python", "-m", "app.worker", "--queues", "render"]
+    mem_limit: ${MEM_RENDER:-2048m}
+    depends_on: [web]
+
+  worker-convert:
+    <<: *heavy
+    command: ["python", "-m", "app.worker", "--queues", "convert"]
+    mem_limit: ${MEM_CONVERT:-3072m}
+    depends_on: [web]
+
+  worker-ocr:
+    <<: *heavy
+    command: ["python", "-m", "app.worker", "--queues", "ocr"]
+    mem_limit: ${MEM_OCR:-3072m}
+    depends_on: [web]
+
+  worker-preview:
+    <<: *heavy
+    command: ["python", "-m", "app.worker", "--queues", "preview"]
+    mem_limit: ${MEM_PREVIEW:-1536m}
+    depends_on: [web]
+
+  scheduler:
+    <<: *app
+    command: ["python", "-m", "app.scheduler"]
+    mem_limit: ${MEM_SCHEDULER:-512m}
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    depends_on: [web]
+
+networks:
+  # 接入已部署的 new-api 的内部网络，worker-ai 通过 http://new-api:3000/v1 调用模型
+  newapi:
+    external: true
+    name: new-api_default
