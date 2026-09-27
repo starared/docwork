@@ -26,8 +26,8 @@ class Settings(BaseSettings):
     public_url: str = "http://127.0.0.1:8000"
     # Cookie 是否带 Secure。接入 HTTPS 前的 SSH 隧道调试可设为 false。
     cookie_secure: bool = True
-    # 由 Nginx 内部转发发送文件（X-Accel-Redirect）。本地开发可关闭。
-    accel_redirect: bool = True
+    # 由前置 Nginx 内部转发发送文件（X-Accel-Redirect）。默认关闭，由程序直接发送文件。
+    accel_redirect: bool = False
     accel_prefix: str = "/_protected"
     # 可信反向代理（逗号分隔的地址或网段）：只有直连地址在其中时才读取 X-Real-IP / X-Forwarded-For。
     # 默认是本机和 Docker 常用网段（宿主机 Nginx 经 Docker 网关连入容器）。
