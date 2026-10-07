@@ -1,5 +1,5 @@
 # DocWork：一个镜像，Web、各类 worker、维护进程共用，只是启动命令不同。
-# 在服务器（ARM64）上直接构建：docker compose build
+# 支持 x86_64 和 ARM64，在服务器上直接构建：docker compose build
 FROM python:3.11-slim-bookworm
 
 ENV PYTHONDONTWRITEBYTECODE=1 \

@@ -7,7 +7,7 @@ x-app: &app
   image: docwork:latest
   env_file: .env
   volumes:
-    - ${DW_HOST_DATA:-/srv/docwork}:/data
+    - ${DW_HOST_DATA:-./data}:/data
   restart: unless-stopped
   logging:
     driver: json-file
