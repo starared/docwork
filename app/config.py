@@ -44,6 +44,11 @@ class Settings(BaseSettings):
     ai_concurrency: int | None = None
     # 单个外部进程（LibreOffice、OCR）的内存上限，MB
     proc_mem_mb: int | None = None
+    # 常驻 LibreOffice：auto（只在 rlimit 沙箱下、且系统 Python 能导入 uno 时启用）或 off。
+    # 常驻实例省去每次转换 2 到 5 秒的冷启动，但一个实例会先后处理多个任务的文档。
+    office_resident: str = "auto"
+    # 运行 UNO 转换脚本的 Python（需要能 import uno，Debian/Ubuntu 上由 python3-uno 提供）
+    uno_python: str = "/usr/bin/python3"
     # 任务超时（秒）
     heavy_timeout: int = 600
     ai_timeout: int = 1800
@@ -132,6 +137,6 @@ def reset_settings() -> None:
 APP_DIR = Path(__file__).resolve().parent
 STATIC_DIR = APP_DIR.parent / "static"
 # 程序版本（发布时同步打 Git 标签 v版本号）
-APP_VERSION = "1.1.1"
+APP_VERSION = "1.1.2"
 RENDERER_VERSION = "1.0.0"
 SPEC_VERSION = 1

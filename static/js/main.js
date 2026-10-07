@@ -128,7 +128,15 @@ function shell() {
       h('a', { href: '#/account' }, '账户'),
       h('a', { href: '#', onclick: async (e) => { e.preventDefault(); await post('/api/logout'); location.hash = '#/'; location.reload(); } }, '退出')));
   const main = h('div', { class: 'main', id: 'main' });
-  clear(app, h('aside', { class: 'side' }, h('div', { class: 'logo' }, 'DocWork', h('small', {}, 'AI 文档工作台')), nav, foot), main);
+  // 手机上侧栏是顶栏，菜单按钮打开左侧抽屉；点遮罩、按 Esc 或跳转页面后关闭
+  const side = h('aside', { class: 'side' });
+  const setOpen = (open) => { side.classList.toggle('open', open); menuBtn.setAttribute('aria-expanded', String(open)); };
+  const menuBtn = h('button', { class: 'icon-btn menu-btn', 'aria-label': '菜单', 'aria-expanded': 'false', onclick: () => setOpen(!side.classList.contains('open')) }, '☰');
+  side.append(h('div', { class: 'logo' }, 'DocWork', h('small', {}, 'AI 文档工作台')), menuBtn,
+    h('div', { class: 'side-back', onclick: () => setOpen(false) }), h('div', { class: 'drawer' }, nav, foot));
+  nav.addEventListener('click', (e) => { if (e.target.closest('a')) setOpen(false); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') setOpen(false); });
+  clear(app, side, main);
   if (me.disk && me.disk !== 'ok') toast(me.disk === 'block' ? '服务器磁盘空间不足，已暂停上传和新任务' : '服务器磁盘使用率较高', 'error', 8000);
   return main;
 }
@@ -137,6 +145,8 @@ async function route() {
   const path = (location.hash.replace(/^#/, '') || '/').split('?')[0];
   if (cleanup) { try { cleanup(); } catch (e) { /* 忽略 */ } cleanup = null; }
   const main = shell();
+  const side = $('.side');
+  if (side) side.classList.remove('open');
   for (const a of document.querySelectorAll('.side nav a')) {
     a.classList.toggle('active', a.getAttribute('href') === '#' + path || (path.startsWith('/work/') && a.getAttribute('href') === '#/works'));
   }

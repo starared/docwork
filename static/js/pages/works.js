@@ -1,4 +1,4 @@
-import { api, clear, confirmDialog, csrfToken, del, empty, errToast, fileUrl, fmtTime, h, isOwner, patch, post, select, tabs, toast } from '../lib.js';
+import { api, clear, confirmDialog, csrfToken, del, empty, errToast, fileUrl, fmtTime, h, isOwner, patch, post, select, skeleton, tabs, toast } from '../lib.js';
 
 const KIND_ICON = { ppt: 'PPT', doc: 'W', xls: 'X', import_pptx: 'PPT', import_docx: 'W', import_xlsx: 'X' };
 
@@ -66,14 +66,23 @@ export async function render(page) {
     if (st.starred) qs.set('starred', '1');
     if (st.trash) qs.set('trash', '1');
     if (st.all) qs.set('all', '1');
+    if (reset) clear(grid, [...skeleton('cards', 8).children]);
     let r;
-    try { r = await api('/api/works?' + qs); } catch (e) { return errToast(e); }
+    try { r = await api('/api/works?' + qs); } catch (e) { clear(grid); return errToast(e); }
     if (reset) {
       clear(grid);
       clear(folderSel, h('option', { value: '' }, '全部文件夹'), r.folders.map((f) => h('option', { value: f, selected: f === st.folder || null }, f)));
       clear(tagSel, h('option', { value: '' }, '全部标签'), r.tags.map((t) => h('option', { value: t, selected: t === st.tag || null }, t)));
     }
-    if (!r.items.length && reset) grid.append(empty(st.trash ? '回收站是空的' : '没有找到作品'));
+    if (!r.items.length && reset) {
+      const filtered = st.kind || st.q || st.folder || st.tag || st.starred;
+      grid.append(st.trash ? empty('回收站是空的')
+        : filtered ? empty('没有符合条件的作品', ['清除筛选', () => {
+          Object.assign(st, { kind: '', q: '', folder: '', tag: '', starred: false });
+          q.value = ''; starChk.checked = false; drawTabs(); load(true);
+        }])
+          : empty('还没有作品。在工作台选择一种文档开始创建，或导入已有文件。', ['去工作台', '#/']));
+    }
     for (const w of r.items) {
       grid.append(workCard(w, { selectable: !st.trash, selected: selected.has(w.id), trash: st.trash, onChanged: () => load(true),
         onToggle: (on) => { if (on) selected.set(w.id, w); else selected.delete(w.id); drawBulk(); } }));

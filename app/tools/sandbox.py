@@ -68,24 +68,24 @@ def _limited(mem_mb: int, cpu_s: int, fsize_mb: int, cmd: Sequence[str]) -> list
     return [sys.executable, "-I", _LIMITED, str(mem_mb), str(cpu_s), str(fsize_mb), "--", *cmd]
 
 
-def run(
+def prepare(
     cmd: Sequence[str],
     cwd: Path,
     *,
     timeout: int | None = None,
-    cancel: Callable[[], bool] | None = None,
+    cpu_s: int | None = None,
     mem_mb: int | None = None,
     network: bool = False,
     env: dict | None = None,
     writable: Sequence[Path] = (),
-    check: bool = True,
-) -> Result:
+) -> tuple[list[str], dict]:
+    """组装受控执行的完整命令行和环境变量（资源限制 + 可选 bubblewrap）。run() 和常驻进程共用。"""
     s = get_settings()
     timeout = timeout or s.heavy_timeout
     # 虚拟内存上限取进程内存上限的 3 倍：LibreOffice 等程序会预留大量虚拟地址空间，
     # 实际物理内存由容器内存上限约束，这里只防止失控进程。
     mem = (mem_mb or s.proc_mem_limit_mb) * 3
-    full = _limited(mem, timeout + 30, s.max_job_tmp_mb, cmd)
+    full = _limited(int(mem), int(cpu_s or timeout + 30), s.max_job_tmp_mb, cmd)
     mode = s.sandbox
     if mode in ("auto", "bwrap") and bwrap_available():
         wr = [str(Path(cwd).resolve())] + [str(Path(p).resolve()) for p in writable]
@@ -102,6 +102,23 @@ def run(
             "TMPDIR": str(cwd), "SAL_USE_VCLPLUGIN": "svp"}
     if env:
         penv.update(env)
+    return full, penv
+
+
+def run(
+    cmd: Sequence[str],
+    cwd: Path,
+    *,
+    timeout: int | None = None,
+    cancel: Callable[[], bool] | None = None,
+    mem_mb: int | None = None,
+    network: bool = False,
+    env: dict | None = None,
+    writable: Sequence[Path] = (),
+    check: bool = True,
+) -> Result:
+    timeout = timeout or get_settings().heavy_timeout
+    full, penv = prepare(cmd, cwd, timeout=timeout, mem_mb=mem_mb, network=network, env=env, writable=writable)
     t0 = time.time()
     out_f = Path(cwd) / f".stdout.{os.getpid()}.{int(t0 * 1000)}"
     err_f = Path(cwd) / f".stderr.{os.getpid()}.{int(t0 * 1000)}"
@@ -139,6 +156,11 @@ def run(
     if check and p.returncode != 0:
         raise ToolError(f"{Path(cmd[0]).name} 执行失败（退出码 {p.returncode}）：{(stderr or stdout)[-800:]}")
     return Result(p.returncode, stdout, stderr, dt)
+
+
+def kill(p: subprocess.Popen) -> None:
+    """结束进程所在的整个进程组（先 SIGTERM，3 秒后 SIGKILL）。"""
+    _kill(p)
 
 
 def _kill(p: subprocess.Popen) -> None:

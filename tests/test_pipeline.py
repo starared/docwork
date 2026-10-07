@@ -188,6 +188,27 @@ class TestPipeline(DBTestCase):
         # 只有被修改的页面预览变化（LibreOffice 偶有个别像素级差异，允许少量误差）
         self.assertGreaterEqual(len(v2["changed"]), e["result"]["applied"])
         self.assertLessEqual(len(v2["changed"]), e["result"]["applied"] + 2)
+        # Word、Excel 原位修改：按每页文字判断已修改页，只改了第一段，不应把所有页面都标为已修改
+        from app.render.docx_render import render_document
+        from app.render.xlsx_render import render_workbook
+        from app.spec.document import Document
+        from app.spec.workbook import Workbook
+        from samples import sample_document, sample_workbook
+        d = self.tmp / "原位报告.docx"
+        render_document(Document.model_validate(sample_document()), d, {}, self.tmp / "r3")
+        x = self.tmp / "原位表格.xlsx"
+        render_workbook(Workbook.model_validate(sample_workbook()), x)
+        for path in (d, x):
+            j = self.run_job("import_file", {"file_id": self.upload(path)["id"]})
+            self.assertEqual(j["status"], "done", j["error"])
+            v = works.get_version(j["result"]["version_id"])
+            e = self.run_job("import_edit", {"instruction": "改一处", "scope": {"type": "all"}, "base_version_id": v["id"]},
+                             work_id=j["result"]["work_id"])
+            self.assertEqual(e["status"], "done", e["error"])
+            v2 = works.get_version(e["result"]["version_id"])
+            n = len(v2["manifest"]["pages"])
+            self.assertIn("1", v2["changed"], path.name)
+            self.assertTrue(n == 1 or len(v2["changed"]) < n, (path.name, v2["changed"], n))
         # PDF 重建为 PPT
         from app.tools import office
         pdf = office.to_pdf(p, self.tmp / "pdf")

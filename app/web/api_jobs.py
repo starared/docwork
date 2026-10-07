@@ -9,7 +9,6 @@ from starlette.concurrency import run_in_threadpool
 from starlette.responses import StreamingResponse
 
 from .. import accounts, db, jobs, models_cfg, quota, works
-from ..tools import convert as convmod
 from ..util import UserError, new_id
 from .common import SESSION_COOKIE, Req, api, disk_blocked, page_args
 
@@ -157,6 +156,7 @@ def create_job(s: accounts.Scope, kind: str, params: dict, work_id: str | None =
         k = (f.get("meta") or {}).get("kind")
         if p.get("target") == "pptx_rebuild":
             raise UserError("PDF 重建为可编辑 PPT 请使用“重建”功能")
+        from ..tools import convert as convmod  # 延迟导入：convert 连带 pikepdf 等，Web 进程平时用不到
         if not any(t["target"] == p.get("target") for t in convmod.targets_for(k or "")):
             raise UserError("不支持该转换")
     if kind == "pdf_tool" and p.get("op") not in ("merge", "split", "compress", "rotate", "reorder", "extract_text", "extract_images"):

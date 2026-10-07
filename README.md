@@ -17,7 +17,7 @@ DocWork 是一个自托管的 AI 文档工作台。接入你自己的大模型�
    ```bash
    sudo apt update
    sudo apt install -y git python3 python3-venv \
-       libreoffice-core libreoffice-writer libreoffice-calc libreoffice-impress libreoffice-draw libreoffice-math \
+       libreoffice-core libreoffice-writer libreoffice-calc libreoffice-impress libreoffice-draw libreoffice-math python3-uno \
        fonts-noto-cjk fonts-noto-cjk-extra fonts-liberation2 fonts-crosextra-carlito fonts-crosextra-caladea \
        fonts-dejavu-core fonts-arphic-ukai fontconfig \
        ghostscript qpdf pandoc tesseract-ocr tesseract-ocr-chi-sim tesseract-ocr-eng bubblewrap libgl1
@@ -113,8 +113,10 @@ docker compose up -d
 更新到新版本：
 
 ```bash
-git pull && docker compose build && docker compose up -d
+git pull && docker compose build && docker compose up -d --remove-orphans
 ```
+
+`--remove-orphans` 会清理旧版本留下、新版本已不再使用的容器（例如 1.1.2 起渲染、转换、OCR、预览合并为一个 `worker-heavy`）。
 
 ## 功能
 

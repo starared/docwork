@@ -269,6 +269,28 @@ def extract_images(path: Path, outdir: Path) -> list[Path]:
     return outs
 
 
+def page_text_hashes(path: Path) -> list[str | None]:
+    """每页文字的哈希（去掉空白后计算）；没有文字的页面为 None。用于判断 Word、Excel 哪些页面的内容变了。"""
+    import hashlib
+    import re
+
+    import pypdfium2 as pdfium
+
+    pdf = pdfium.PdfDocument(str(path))
+    out: list[str | None] = []
+    try:
+        for i in range(len(pdf)):
+            tp = pdf[i].get_textpage()
+            try:
+                t = re.sub(r"\s+", "", tp.get_text_range())
+            finally:
+                tp.close()
+            out.append(hashlib.sha256(t.encode()).hexdigest()[:24] if t else None)
+    finally:
+        pdf.close()
+    return out
+
+
 def render_page(path: Path, index: int, dpi: int = 150):
     """渲染单页为 PIL 图片。"""
     import pypdfium2 as pdfium

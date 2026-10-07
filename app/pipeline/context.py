@@ -9,6 +9,9 @@ from .. import jobs, storage
 from ..config import get_settings
 from ..llm import LLM
 
+# 处理函数返回它表示“等待用户确认”（如大纲确认），任务暂停而不是完成。
+AWAITING = object()
+
 
 class Ctx:
     def __init__(self, job: dict):

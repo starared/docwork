@@ -163,6 +163,40 @@ class TestTools(DBTestCase):
         self.assertEqual(inv.get("charts"), 1)
         self.assertEqual(ooxml.compare_inventory({"charts": 2}, {"charts": 1}), ["图表从 2 个变为 1 个"])
 
+    def test_resident_office(self):
+        """常驻 LibreOffice：复用同一实例；坏文件仍报准确错误且不影响实例；实例被结束后自动重启；超时会结束实例。"""
+        import os
+        import signal
+        from app.tools import lo_resident, office, sandbox
+        if not lo_resident.enabled():
+            self.skipTest("系统 Python 无法导入 uno，或当前沙箱不是 rlimit")
+        out = self.w / "resident"
+        a = office.to_pdf(self.docx, out / "a")
+        inst = lo_resident._instance()
+        pid = inst.proc.pid
+        b = office.to_pdf(self.pptx, out / "b")
+        self.assertEqual(inst.proc.pid, pid, "第二次转换应复用同一个常驻实例")
+        self.assertGreater(a.stat().st_size, 1000)
+        self.assertGreater(b.stat().st_size, 1000)
+        x = office.recalc_copy(self.xlsx, out / "c")
+        self.assertEqual(x.suffix, ".xlsx")
+        bad = self.w / "bad.docx"
+        bad.write_bytes(b"PK\x03\x04 broken")
+        with self.assertRaises(sandbox.ToolError):
+            office.to_pdf(bad, out / "d")
+        self.assertTrue(inst.alive(), "坏文件不应结束常驻实例")
+        self.assertTrue(lo_resident.enabled())
+        os.killpg(inst.proc.pid, signal.SIGKILL)
+        inst.proc.wait()
+        c = office.to_pdf(self.docx, out / "e")
+        self.assertTrue(c.exists())
+        self.assertNotEqual(inst.proc.pid, pid, "实例被结束后应重新启动")
+        from unittest import mock
+        with mock.patch.object(lo_resident.sandbox, "run", side_effect=sandbox.ToolError("运行超时")):
+            with self.assertRaises(sandbox.ToolError):
+                office.to_pdf(self.docx, out / "f")
+        self.assertFalse(inst.alive(), "超时后应结束常驻实例")
+
     def test_sandbox_timeout_and_cancel(self):
         import time
         from app.tools import sandbox

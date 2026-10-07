@@ -1,0 +1,52 @@
+name: 测试
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      DW_SANDBOX: rlimit
+      SAL_USE_VCLPLUGIN: svp
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      # 与 Dockerfile 相同的系统组件（去掉部署才需要的 restic/tini 等）
+      - name: 安装系统组件
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libreoffice-core libreoffice-writer libreoffice-calc libreoffice-impress libreoffice-draw libreoffice-math \
+            python3-uno \
+            fonts-noto-cjk fonts-liberation2 fonts-crosextra-carlito fonts-crosextra-caladea fonts-dejavu-core fontconfig \
+            ghostscript qpdf pandoc \
+            tesseract-ocr tesseract-ocr-chi-sim tesseract-ocr-eng
+          sudo cp deploy/fonts.conf /etc/fonts/local.conf
+          sudo fc-cache -f
+
+      - name: 安装 Python 依赖
+        run: pip install -r requirements.txt
+
+      - name: 编译检查
+        run: python -m compileall -q app tests
+
+      - name: 单元与集成测试
+        working-directory: tests
+        run: python -m unittest -v test_core test_api test_regressions test_tools test_research test_pipeline

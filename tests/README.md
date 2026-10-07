@@ -16,8 +16,9 @@ DW_SANDBOX=rlimit python -m unittest test_core test_api test_regressions test_to
 - `test_research`：联网资料（网页正文、内网拦截、SearXNG 流程）。
 - `test_pipeline`：模拟模型接口 + 真实 worker 的端到端生成、修改、导入、工具任务。
 
-没有安装 OCR 引擎（RapidOCR 或 Tesseract）时，`test_pipeline.test_06_tools` 的 OCR 步骤会失败；
-没有中文字体时，预览图的像素差异可能让 `test_05` 的页面变化计数超出容差。
+没有安装 OCR 引擎（RapidOCR 或 Tesseract）时，`test_pipeline.test_06_tools` 的 OCR 步骤会失败。
+系统 Python 能 `import uno`（`python3-uno`）时，`test_tools.test_resident_office` 会测试常驻 LibreOffice，否则跳过。
+推送和 PR 时 GitHub Actions 会自动运行上面这些测试（`.github/workflows/test.yml`）。
 
 ## 浏览器端到端测试
 

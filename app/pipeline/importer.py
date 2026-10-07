@@ -129,6 +129,31 @@ def _content_hashes(kind: str, path: Path, units: list[dict], pages: list[dict])
     return out
 
 
+def _text_changed_pages(ctx: Ctx, cur: dict, prev: dict) -> list[str] | None:
+    """Word、Excel：比较修改前后预览 PDF 每页的文字，判断哪些页面变了（预览图像素会随字体、渲染细节变化）。
+    页数相同时逐页比较；页数变了（内容增减导致分页变化）时，文字在旧版本中找不到的页面算作已修改。
+    没有文字的页面（纯图片）退回比较预览图哈希。拿不到旧版本的 PDF 时返回 None，由调用方按图像哈希判断。"""
+    old_pdf = ((cur["manifest"] or {}).get("exports") or {}).get("pdf", {}).get("sha")
+    new_pdf = (prev.get("pdf") or {}).get("sha")
+    old_pages = (cur["manifest"] or {}).get("pages", [])
+    if not old_pdf or not new_pdf:
+        return None
+    try:
+        a = pdftools.page_text_hashes(storage.materialize(old_pdf, ctx.tmp / "cmp_old", "old.pdf"))
+        b = pdftools.page_text_hashes(storage.materialize(new_pdf, ctx.tmp / "cmp_new", "new.pdf"))
+    except Exception:
+        return None
+    pages = prev["pages"]
+    if len(b) != len(pages) or len(a) != len(old_pages):
+        return None
+    if len(a) == len(b):
+        return [p["id"] for i, p in enumerate(pages)
+                if a[i] != b[i] or (b[i] is None and p["hash"] != old_pages[i].get("hash"))]
+    old_text = {x for x in a if x}
+    old_img = {p.get("hash") for p in old_pages}
+    return [p["id"] for i, p in enumerate(pages) if (b[i] not in old_text if b[i] else p["hash"] not in old_img)]
+
+
 def import_report(kind: str, units: list[dict], inv: dict, notes: list[str]) -> dict:
     counts: dict[str, int] = {}
     for u in units:
@@ -219,6 +244,8 @@ def handle_import_edit(ctx: Ctx) -> dict:
     if old_hashes and new_hashes and len(old_hashes) == len(new_hashes) and not any(o.get("op") in ("delete_slide", "duplicate_slide", "move_slide") for o in all_ops):
         # PPT：按每页内容判断哪些页变了。预览图的像素哈希随 LibreOffice 版本、字体而变，不能用来判断
         changed = [p["id"] for p, a, b in zip(prev["pages"], old_hashes, new_hashes) if a != b]
+    elif kind in ("docx", "xlsx") and (text_changed := _text_changed_pages(ctx, cur, prev)) is not None:
+        changed = text_changed
     else:
         old_pages = {p["hash"] for p in (cur["manifest"] or {}).get("pages", [])}
         changed = [p["id"] for p in prev["pages"] if p["hash"] not in old_pages]

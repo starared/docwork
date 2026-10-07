@@ -400,8 +400,21 @@ export function uploader({ multiple = true, accept = '', label = '选择文件',
   return el;
 }
 
+// 空状态：action 可以是按钮元素，或 [文字, 链接或点击函数]
 export function empty(text, action) {
+  if (Array.isArray(action)) {
+    const [label, to] = action;
+    action = typeof to === 'function'
+      ? h('button', { class: 'btn primary', onclick: to }, label)
+      : h('a', { class: 'btn primary', href: to, style: { textDecoration: 'none' } }, label);
+  }
   return h('div', { class: 'empty' }, h('p', {}, text), action || null);
+}
+
+// 加载中的占位：rows 为列表行，cards 为卡片网格
+export function skeleton(kind = 'rows', n = 4) {
+  if (kind === 'cards') return h('div', { class: 'works', 'aria-busy': 'true' }, Array.from({ length: n }, () => h('div', { class: 'skel skel-card' })));
+  return h('div', { 'aria-busy': 'true' }, Array.from({ length: n }, () => h('div', { class: 'skel skel-row' })));
 }
 
 export function tabs(items, active, onSelect) {

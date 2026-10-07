@@ -1,4 +1,4 @@
-import { api, clear, download, empty, fmtDateTime, fmtSize, h, isOwner, JOB_STATUS, jobCard, modal, post, select } from '../lib.js';
+import { api, clear, download, empty, fmtDateTime, fmtSize, h, isOwner, JOB_STATUS, jobCard, modal, post, select, skeleton } from '../lib.js';
 import { outlineDialog } from './create.js';
 
 export async function render(page) {
@@ -18,9 +18,14 @@ export async function render(page) {
     const qs = new URLSearchParams({ limit: 60 });
     if (st.status) qs.set('status', st.status);
     if (st.all) qs.set('all', '1');
+    if (!list.firstChild) list.append(skeleton('rows', 4));
     const r = await api('/api/jobs?' + qs);
     clear(list);
-    if (!r.items.length) list.append(empty('没有任务'));
+    if (!r.items.length) {
+      list.append(st.status
+        ? empty('没有符合条件的任务', ['显示全部任务', () => { statusSel.value = ''; st.status = ''; load(); }])
+        : empty('还没有任务。生成文档、导入文件或使用工具后，进度会显示在这里。', ['去工作台', '#/']));
+    }
     for (const j of r.items) {
       const card = jobCard(j, { onDone: (jj, el) => extras(jj, el) });
       card.append(h('div', { class: 'muted small' }, `创建于 ${fmtDateTime(j.created_at)}${j.finished_at ? '，结束于 ' + fmtDateTime(j.finished_at) : ''}`));
