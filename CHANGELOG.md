@@ -1,5 +1,11 @@
 # 更新记录
 
+## 未发布
+
+### 其他
+- 排版检查（PPT 文字溢出、越界，Word 文字覆盖率）改用 pypdfium2 读取字符坐标，结果与之前一致，样例 PPT 从 2.5 秒降到 0.07 秒，AI 任务 worker 不再因此加载 pdfplumber。
+- GitHub Actions 新增两项：浏览器端到端测试（`tests/run_e2e.sh` 一键启动全部服务后运行 Playwright 脚本，截图作为构建产物保留 7 天）；构建 Docker 镜像并用 `docker compose` 启动全部服务跑冒烟测试（`tests/smoke_docker.py`），同时验证常驻 LibreOffice 在只读、无网络的容器里正常工作。
+
 ## 1.1.2（2026-10-07）
 
 升级时注意：Docker 部署的四个重负载容器合并为一个 `worker-heavy`，请用 `docker compose up -d --remove-orphans` 清理旧容器；`.env` 中的 `MEM_RENDER`、`MEM_CONVERT`、`MEM_OCR`、`MEM_PREVIEW` 不再使用，改为 `MEM_HEAVY`（默认 3072m）。

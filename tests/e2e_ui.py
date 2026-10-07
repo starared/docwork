@@ -45,7 +45,9 @@ def make_files(tmp: Path):
 def main():
     files = make_files(OUT / "files")
     with sync_playwright() as p:
-        b = p.chromium.launch()
+        # E2E_CHROMIUM 可以指定浏览器可执行文件（Playwright 自带的 Chromium 下载不了时用系统或预装的）
+        import os
+        b = p.chromium.launch(executable_path=os.environ.get("E2E_CHROMIUM") or None)
         ctx = b.new_context(viewport={"width": 1440, "height": 900}, accept_downloads=True)
         page = ctx.new_page()
         page.on("pageerror", lambda e: errors.append(f"pageerror: {e}"))

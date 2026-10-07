@@ -18,9 +18,20 @@ DW_SANDBOX=rlimit python -m unittest test_core test_api test_regressions test_to
 
 没有安装 OCR 引擎（RapidOCR 或 Tesseract）时，`test_pipeline.test_06_tools` 的 OCR 步骤会失败。
 系统 Python 能 `import uno`（`python3-uno`）时，`test_tools.test_resident_office` 会测试常驻 LibreOffice，否则跳过。
-推送和 PR 时 GitHub Actions 会自动运行上面这些测试（`.github/workflows/test.yml`）。
+推送和 PR 时 GitHub Actions（`.github/workflows/test.yml`）会运行三项：上面的单元与集成测试、下面的浏览器端到端测试，
+以及构建 Docker 镜像后用 `docker compose` 启动全部服务并运行 `tests/smoke_docker.py`（登录、上传、转换、导入预览，
+并检查常驻 LibreOffice 在只读无网络的容器里正常工作）。
 
 ## 浏览器端到端测试
+
+一键运行（会在临时目录里启动模拟模型接口、Web、两类 worker，跑完自动结束）：
+
+```bash
+pip install playwright && python -m playwright install --with-deps chromium
+tests/run_e2e.sh /tmp/e2e_shots
+```
+
+Playwright 自带的 Chromium 下载不了时，用 `E2E_CHROMIUM=/path/to/chrome` 指定浏览器。手动分步运行：
 
 `e2e_ui.py` 用 Playwright 驱动真实浏览器走一遍主要流程，需要先启动三样东西：
 
