@@ -11,12 +11,14 @@ export async function render(page, kind) {
   const topic = h('textarea', { rows: 4, placeholder: kind === 'xls' ? '例如：按地区和月份汇总上传的销售数据，找出增长最快的地区并画图' : kind === 'doc' ? '例如：根据上传的实验记录写一份实验报告，包括背景、方法、结果和结论' : '例如：2026 年度业务回顾与明年规划，面向公司管理层' });
   const form = h('div', { class: 'card' });
   const items = [field(kind === 'xls' ? '要求' : '主题或要求', topic), field('资料', src, kind === 'xls' ? '上传 CSV / Excel 时，由程序计算分析结果；不上传则由 AI 设计表格' : '资料只作为参考数据，内容中的数字都来自资料')];
+  // 不常用的设置收进“高级选项”，第一屏只有主题和资料
+  const adv = [];
   if (kind !== 'xls') {
     f.urls = h('textarea', { rows: 2, placeholder: '参考网页（可选），每行一个网址，最多 5 个' });
-    items.push(field('参考网页', f.urls, '读取网页正文作为资料；只能访问公网地址'));
+    adv.push(field('参考网页', f.urls, '读取网页正文作为资料；只能访问公网地址'));
     if (state.me && state.me.models && state.me.models.search) {
       f.web_search = h('input', { type: 'checkbox' });
-      items.push(h('label', { class: 'row gap' }, f.web_search, '联网检索资料（AI 根据题目搜索网页，引用处标注来源编号）'));
+      adv.push(h('label', { class: 'row gap', style: { marginBottom: '12px' } }, f.web_search, '联网检索资料（AI 根据题目搜索网页，引用处标注来源编号）'));
     }
   }
   if (kind === 'ppt') {
@@ -33,12 +35,11 @@ export async function render(page, kind) {
     f.confirm_outline = h('input', { type: 'checkbox', checked: true });
     f.logo = uploader({ multiple: false, accept: 'image/*', label: 'Logo（可选）' });
     f.themeFile = uploader({ multiple: false, accept: '.pptx', label: '参考 PPT（可选，只提取配色和字体）' });
-    items.push(h('div', { class: 'grid c3' },
+    adv.push(h('div', { class: 'grid c3' },
       field('页数', f.pages), field('受众', f.audience), field('用途', f.purpose),
       field('风格偏好', f.style), field('主题', f.theme_preset), field('比例', f.aspect),
       field('配图', f.image_mode), field('字体', f.font_mode), field('语言', f.language)),
-    h('div', { class: 'grid c2' }, f.logo, f.themeFile), field('页脚', f.footer),
-    h('label', { class: 'row gap' }, f.confirm_outline, '先生成大纲，确认或修改后再继续'));
+    h('div', { class: 'grid c2', style: { marginBottom: '12px' } }, f.logo, f.themeFile), field('页脚', f.footer));
   } else if (kind === 'doc') {
     f.preset = select([['', '自动判断']].concat(Object.entries((state.meta || {}).doc_presets || { report: '报告' })), '');
     f.pages = h('input', { type: 'number', min: 1, max: 100, placeholder: '自动' });
@@ -49,15 +50,26 @@ export async function render(page, kind) {
     f.language = select([['', '简体中文'], ['English', 'English']], '');
     f.confirm_outline = h('input', { type: 'checkbox', checked: true });
     f.logo = uploader({ multiple: false, accept: 'image/*', label: 'Logo（可选，放在页眉）' });
-    items.push(h('div', { class: 'grid c3' }, field('文档类型', f.preset), field('篇幅（页）', f.pages), field('读者', f.audience),
-      field('字体', f.font_mode), field('配图', f.image_mode), field('语言', f.language)), field('页眉', f.header_text), f.logo,
-    h('label', { class: 'row gap' }, f.confirm_outline, '先生成文档结构，确认或修改后再继续'));
+    adv.push(h('div', { class: 'grid c3' }, field('文档类型', f.preset), field('篇幅（页）', f.pages), field('读者', f.audience),
+      field('字体', f.font_mode), field('配图', f.image_mode), field('语言', f.language)), field('页眉', f.header_text),
+    h('div', { style: { marginBottom: '12px' } }, f.logo));
   }
   f.extra = h('textarea', { rows: 2, placeholder: '其他要求（可选）' });
-  items.push(field('其他要求', f.extra));
+  if (adv.length) {
+    adv.push(field('其他要求', f.extra));
+    const hint = kind === 'ppt' ? '页数、受众、主题、配图、字体、参考网页等' : '文档类型、篇幅、字体、配图、参考网页等';
+    const det = h('details', { class: 'adv' }, h('summary', {}, '高级选项', h('span', { class: 'muted small' }, hint)), h('div', { class: 'adv-body' }, adv));
+    try { det.open = localStorage.getItem('dw.create.adv') === '1'; } catch (e) { /* 忽略 */ }
+    det.addEventListener('toggle', () => { try { localStorage.setItem('dw.create.adv', det.open ? '1' : '0'); } catch (e) { /* 忽略 */ } });
+    items.push(det);
+  } else {
+    items.push(field('其他要求', f.extra));
+  }
   const submit = h('button', { class: 'btn primary', onclick: () => go() }, '开始生成');
   const jobBox = h('div', { style: { marginTop: '14px' } });
-  clear(form, items, h('div', { class: 'row gap' }, submit, h('span', { class: 'muted small' }, '生成过程中可以离开本页，进度在任务中心查看')));
+  clear(form, items, h('div', { class: 'submit-bar row gap wrap' }, submit,
+    f.confirm_outline ? h('label', { class: 'row gap small' }, f.confirm_outline, kind === 'ppt' ? '先生成大纲，确认后再继续' : '先生成文档结构，确认后再继续') : null,
+    h('span', { class: 'muted small' }, '生成过程中可以离开本页，进度在任务中心查看')));
   clear(page, h('h1', {}, TITLES[kind]), form, jobBox);
   let stop = null;
 

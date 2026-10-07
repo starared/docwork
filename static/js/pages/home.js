@@ -1,4 +1,4 @@
-import { api, can, clear, empty, fileUrl, fmtTime, h, isOwner, jobCard, state } from '../lib.js';
+import { api, can, clear, empty, fileUrl, fmtTime, h, isOwner, jobCard, skeleton, state } from '../lib.js';
 import { workCard } from './works.js';
 
 export async function render(page) {
@@ -18,8 +18,8 @@ export async function render(page) {
     ? h('div', { class: 'card', style: { borderColor: 'var(--warn)' } },
       isOwner() ? ['尚未配置可用的文字模型接口，AI 功能暂不可用。', h('a', { href: '#/admin/models' }, ' 去配置')] : '管理员尚未配置模型接口，AI 功能暂不可用；格式转换和 PDF 工具可以正常使用。')
     : null;
-  const jobsBox = h('div');
-  const worksBox = h('div', { class: 'works' });
+  const jobsBox = h('div', {}, skeleton('rows', 1));
+  const worksBox = h('div', { class: 'works' }, [...skeleton('cards', 4).children]);
   clear(page,
     h('h1', {}, isOwner() ? '工作台' : `欢迎，${me.note || '访客'}`),
     warn,
@@ -33,13 +33,18 @@ export async function render(page) {
   );
   const stops = [];
   const [jobs, works] = await Promise.all([api('/api/jobs?status=active&limit=10'), api('/api/works?limit=8')]);
+  clear(jobsBox);
+  clear(worksBox);
   if (!jobs.items.length) jobsBox.append(h('p', { class: 'muted' }, '没有进行中的任务'));
   for (const j of jobs.items) {
     const c = jobCard(j, { onDone: (jj) => { if (jj.status === 'done' && jj.result && jj.result.work_id) c.append(h('a', { href: `#/work/${jj.result.work_id}` }, '打开作品')); } });
     stops.push(c._stop);
     jobsBox.append(c);
   }
-  if (!works.items.length) worksBox.replaceWith(empty('还没有作品。从上面选择一种开始创建。'));
+  if (!works.items.length) {
+    worksBox.replaceWith(cards.length ? empty('还没有作品。', [cards[0][2], `#/create/${cards[0][0]}`])
+      : empty('还没有作品。', can('import') ? ['导入已有文件', '#/tools/import'] : null));
+  }
   for (const w of works.items) worksBox.append(workCard(w));
   return () => stops.forEach((s) => s());
 }
