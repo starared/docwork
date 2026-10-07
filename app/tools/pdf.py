@@ -1,6 +1,6 @@
 """PDF 工具：合并、拆分、压缩、旋转、排序与删页、文字提取、图片提取、页面渲染。
 
-使用 pikepdf（qpdf）处理结构，pdfplumber 提取带坐标的文字和表格，pypdfium2 渲染页面，
+使用 pikepdf（qpdf）处理结构，pdfplumber 提取带坐标的文字和表格（PDF 转 Word、提取文字），pypdfium2 渲染页面和排版检查，
 Ghostscript 负责压缩中的图片重采样。
 """
 from __future__ import annotations

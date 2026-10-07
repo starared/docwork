@@ -19,17 +19,39 @@ def norm(s: str) -> str:
     return _WS.sub("", s or "")
 
 
+def _page_chars(pdf, index: int) -> tuple[float, float, list[dict]]:
+    """用 pypdfium2 读出一页的全部字符及其框（左上角为原点，与 pdfplumber 的坐标约定一致）。
+    pdfplumber 约占 20 MB 内存且逐页解析很慢，这里只需要字符和坐标。"""
+    page = pdf[index]
+    W, H = page.get_size()
+    tp = page.get_textpage()
+    chars = []
+    try:
+        n = tp.count_chars()
+        text = tp.get_text_range(0, n) if n else ""
+        # get_text_range 返回的字符串与字符索引一一对应（代理对、换行符除外），逐个取框
+        for i in range(n):
+            ch = text[i] if i < len(text) else ""
+            if not ch.strip():
+                continue
+            l, b, r, t = tp.get_charbox(i)
+            if r <= l or t <= b:
+                continue
+            chars.append({"text": ch, "x0": l, "x1": r, "top": H - t, "bottom": H - b})
+    finally:
+        tp.close()
+    return float(W), float(H), chars
+
+
 def check_deck_pdf(pdf_path: Path, slide_ids: list[str], elements: dict[str, list[dict]], tol: float = 4.0) -> list[dict]:
-    import pdfplumber
+    import pypdfium2 as pdfium
 
     issues: list[dict] = []
-    with pdfplumber.open(pdf_path) as pdf:
-        for idx, page in enumerate(pdf.pages):
-            if idx >= len(slide_ids):
-                break
+    pdf = pdfium.PdfDocument(str(pdf_path))
+    try:
+        for idx in range(min(len(pdf), len(slide_ids))):
             sid = slide_ids[idx]
-            W, H = float(page.width), float(page.height)
-            chars = [c for c in page.chars if c["text"].strip()]
+            W, H, chars = _page_chars(pdf, idx)
             page_counts = Counter(norm("".join(c["text"] for c in chars)))
             # 越界
             oob = [c for c in chars if c["x1"] > W + 1 or c["bottom"] > H + 1 or c["x0"] < -1 or c["top"] < -1]
@@ -55,15 +77,27 @@ def check_deck_pdf(pdf_path: Path, slide_ids: list[str], elements: dict[str, lis
                 else:
                     issues.append({"slide": sid, "index": idx, "element": e["id"], "kind": "overflow",
                                    "message": f"约 {missing_in_box} 个字超出了文本框"})
+    finally:
+        pdf.close()
     return issues
 
 
 def check_doc_pdf(pdf_path: Path, expected_text: str) -> list[dict]:
     """Word：全文文字覆盖率核对（公式、图表内文字不计入）。"""
-    import pdfplumber
+    import pypdfium2 as pdfium
 
-    with pdfplumber.open(pdf_path) as pdf:
-        got = Counter(norm("".join(p.extract_text() or "" for p in pdf.pages)))
+    pdf = pdfium.PdfDocument(str(pdf_path))
+    try:
+        parts = []
+        for i in range(len(pdf)):
+            tp = pdf[i].get_textpage()
+            try:
+                parts.append(tp.get_text_range())
+            finally:
+                tp.close()
+    finally:
+        pdf.close()
+    got = Counter(norm("".join(parts)))
     exp = Counter(norm(expected_text))
     total = sum(exp.values())
     if not total:
