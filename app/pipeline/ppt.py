@@ -18,9 +18,8 @@ from .check import condense_ok
 from .common import (add_source_images, collect_sources, ensure_work, file_asset, render, resolve_images, save_version,
                      source_block)
 from .research import citation_hint
-from .context import Ctx
+from .context import AWAITING, Ctx
 
-AWAITING = object()
 BATCH = 6
 
 

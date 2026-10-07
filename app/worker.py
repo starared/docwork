@@ -22,35 +22,57 @@ from .util import UserError
 log = logging.getLogger("docwork.worker")
 
 
-def handlers() -> dict:
-    from .pipeline import artifacts, common, doc, edit, importer, ppt, toolsjobs, xls
+# 任务类型 → (app.pipeline 下的模块, 处理函数)。认领到任务时才导入对应模块：
+# 每个 worker 只加载自己队列用到的代码（例如预览 worker 不会加载 pandas、python-pptx 渲染器），常驻内存小得多。
+HANDLERS: dict[str, tuple[str, str]] = {
+    "gen_ppt": ("ppt", "handle_gen_ppt"),
+    "gen_doc": ("doc", "handle_gen_doc"),
+    "gen_xls": ("xls", "handle_gen_xls"),
+    "edit": ("edit", "handle_edit"),
+    "manual_edit": ("edit", "handle_manual_edit"),
+    "import_edit": ("importer", "handle_import_edit"),
+    "rebuild": ("importer", "handle_rebuild"),
+    "model_test": ("toolsjobs", "handle_model_test"),
+    "render": ("artifacts", "handle_render"),
+    "compat_pack": ("toolsjobs", "handle_compat_pack"),
+    "convert": ("toolsjobs", "handle_convert"),
+    "pdf_tool": ("toolsjobs", "handle_pdf_tool"),
+    "import_file": ("importer", "handle_import_file"),
+    "extract": ("common", "handle_extract"),
+    "ocr": ("toolsjobs", "handle_ocr"),
+    "preview": ("importer", "handle_preview"),
+    "file_pages": ("toolsjobs", "handle_file_pages"),
+    "version_preview": ("importer", "handle_version_preview"),
+}
 
-    return {
-        "gen_ppt": ppt.handle_gen_ppt,
-        "gen_doc": doc.handle_gen_doc,
-        "gen_xls": xls.handle_gen_xls,
-        "edit": edit.handle_edit,
-        "manual_edit": edit.handle_manual_edit,
-        "import_edit": importer.handle_import_edit,
-        "rebuild": importer.handle_rebuild,
-        "model_test": toolsjobs.handle_model_test,
-        "render": artifacts.handle_render,
-        "compat_pack": toolsjobs.handle_compat_pack,
-        "convert": toolsjobs.handle_convert,
-        "pdf_tool": toolsjobs.handle_pdf_tool,
-        "import_file": importer.handle_import_file,
-        "extract": common.handle_extract,
-        "ocr": toolsjobs.handle_ocr,
-        "preview": importer.handle_preview,
-        "file_pages": toolsjobs.handle_file_pages,
-        "version_preview": importer.handle_version_preview,
-    }
+
+class _LazyHandlers:
+    def get(self, kind: str, default=None):
+        ref = HANDLERS.get(kind)
+        if ref is None:
+            return default
+        import importlib
+
+        return getattr(importlib.import_module(f"app.pipeline.{ref[0]}"), ref[1])
+
+    def __getitem__(self, kind: str):
+        fn = self.get(kind)
+        if fn is None:
+            raise KeyError(kind)
+        return fn
+
+    def __contains__(self, kind) -> bool:
+        return kind in HANDLERS
+
+
+def handlers() -> _LazyHandlers:
+    return _LazyHandlers()
 
 
 def execute(job: dict, table: dict | None = None) -> None:
     """执行一个已认领的任务，负责完成、失败、取消与配额结算。"""
     from .pipeline.context import Ctx
-    from .pipeline.ppt import AWAITING
+    from .pipeline.context import AWAITING
     from .tools.sandbox import ToolCancelled, ToolError
     from .llm import LLMError
 

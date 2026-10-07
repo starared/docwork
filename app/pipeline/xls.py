@@ -10,7 +10,6 @@ import json
 import math
 from pathlib import Path
 
-import pandas as pd
 from openpyxl.utils import get_column_letter
 
 from .. import storage
@@ -23,6 +22,20 @@ from .common import ensure_work, gather_sources, render, save_version, source_bl
 from .context import Ctx
 
 MAX_DATA_ROWS = 20000
+
+
+class _LazyPandas:
+    """pandas 约占 50 MB 内存，只有分析上传数据时才用到：第一次访问时才导入，之后替换为真正的模块。
+    worker 和 Web 进程导入本模块时不再连带加载 pandas。"""
+
+    def __getattr__(self, name):
+        import pandas
+
+        globals()["pd"] = pandas
+        return getattr(pandas, name)
+
+
+pd = _LazyPandas()
 
 
 def handle_gen_xls(ctx: Ctx):
