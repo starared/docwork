@@ -97,6 +97,7 @@ def main():
         # 3. 生成 PPT（先确认大纲）
         page.goto(BASE + "/#/create/ppt")
         page.locator("textarea").first.fill("测试主题：年度回顾")
+        page.locator("details.adv").evaluate("d => { d.open = true; }")  # 页数等设置在“高级选项”里
         page.locator("input[type=number]").first.fill("8")
         page.get_by_role("button", name="开始生成").click()
         page.locator(".modal", has_text="确认大纲").wait_for(timeout=120000)
