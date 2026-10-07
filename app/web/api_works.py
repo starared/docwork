@@ -55,18 +55,16 @@ def works_list(req: Req):
     order = {"updated": "w.updated_at DESC", "created": "w.created_at DESC", "title": "w.title"}.get(req.q("sort", "updated"), "w.updated_at DESC")
     rows = db.all_(f"SELECT w.* FROM works w WHERE {' AND '.join(conds)} ORDER BY {order} LIMIT ? OFFSET ?", args + [limit, offset])
     total = db.one(f"SELECT COUNT(*) AS n FROM works w WHERE {' AND '.join(conds)}", args)["n"]
+    # 列表只需要当前版本的清单（缩略图、页数、问题数、导出文件），一次查出，不加载规格 spec
+    summaries = works.version_summaries([r["current_version_id"] for r in rows if r["current_version_id"]])
     items = []
     for r in rows:
         p = works.public_work(r)
         if r["workspace_id"] != req.s.workspace_id and not req.s.is_owner:
             p["readonly"] = True
-        v = works.current_version(r["id"]) if r["current_version_id"] else None
+        v = summaries.get(r["current_version_id"])
         if v:
-            pages = v["manifest"].get("pages") or []
-            p["thumb"] = pages[0].get("file_id") if pages else None
-            p["pages"] = len(pages)
-            p["issues"] = sum(1 for i in v["manifest"].get("issues", []) if i.get("status") not in ("fixed", "visual_ok"))
-            p["version"] = v["number"]
+            p.update(v)
         items.append(p)
     folders = [r["folder"] for r in db.all_(f"SELECT DISTINCT w.folder FROM works w WHERE {where} AND w.folder != '' AND w.deleted_at IS NULL", base_args)]
     tags = sorted({t for r in db.all_(f"SELECT w.tags FROM works w WHERE {where} AND w.deleted_at IS NULL", base_args) for t in db.jload(r["tags"], [])})
