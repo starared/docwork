@@ -244,7 +244,7 @@ def settings_get(req: Req):
     out = {}
     for k in SETTING_KEYS:
         out[k] = db.get_setting(k, DEFAULTS.get(k, getattr(s, k, None)))
-    return {"settings": out, "profile": s.profile, "public_url": s.public_url}
+    return {"settings": out, "profile": s.profile_name, "public_url": s.public_url}
 
 
 @api(auth="owner")
@@ -302,7 +302,7 @@ def system(req: Req):
         "cpu_percent": psutil.cpu_percent(interval=0.3), "cpu_count": psutil.cpu_count(), "load": os.getloadavg(),
         "memory": {"total": vm.total, "used": vm.total - vm.available, "percent": vm.percent},
         "disk": storage.disk_usage(), "disk_state": db.get_setting("disk_state", {}), "queues": queues,
-        "failed_24h": failed, "recent_failed": recent_failed, "profile": s.profile, "heavy_limit": s.heavy_limit,
+        "failed_24h": failed, "recent_failed": recent_failed, "profile": s.profile_name, "heavy_limit": s.heavy_limit,
         "ai_limit": s.ai_limit, "last_backup": db.get_setting("last_db_backup"), "last_restic": db.get_setting("last_restic"),
         "workers": db.all_("SELECT DISTINCT worker FROM jobs WHERE heartbeat_at > ?", (now() - 300,)),
         "ocr_engine": _ocr_engine(), "sandbox": s.sandbox, "sandbox_effective": _sandbox_effective(),

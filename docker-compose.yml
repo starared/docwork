@@ -1,5 +1,5 @@
 # DocWork 部署（单机）。所有容器共用 /data（宿主机目录 ${DW_HOST_DATA}）。
-# 各容器内存上限的默认值按整套服务共 10 GB 分配（合计 10240 MB），可在 .env 中按服务器配置覆盖。
+# 各容器的 mem_limit 是封顶值而不是常驻占用，默认合计 10240 MB，可在 .env 中按机器情况覆盖。
 # - web：对外提供网页，监听 ${DW_BIND}:${DW_PORT}。
 # - worker-ai：调用 OpenAI 兼容的模型接口，需要能访问该接口。
 # - 重负载 worker（渲染、转换、OCR、预览）：network_mode: none，完全没有网络；根文件系统只读。

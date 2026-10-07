@@ -7,14 +7,17 @@ from pathlib import Path
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# 资源配置档：并发数量与单个外部进程的内存上限。各容器的内存上限写在 docker-compose.yml 中，通过同名变量引用。
-# 默认档 4c10g：整套服务共 10 GB 内存（各容器上限之和为 10240 MB）。
+# 资源配置档：决定并发数量和单个外部进程（LibreOffice、OCR）的内存封顶值。
+# 这些都是上限，不是常驻占用；各容器的内存封顶值写在 docker-compose.yml 中，通过 MEM_* 变量引用。
+# 单项可用 DW_HEAVY_GLOBAL、DW_AI_CONCURRENCY、DW_PROC_MEM_MB 覆盖。
 PROFILES = {
-    "4c10g": {"heavy_global": 2, "ai_concurrency": 4, "lo_mem_mb": 2560, "ocr_mem_mb": 2560},
-    "4c24g": {"heavy_global": 2, "ai_concurrency": 6, "lo_mem_mb": 3072, "ocr_mem_mb": 3072},
-    "2c12g": {"heavy_global": 1, "ai_concurrency": 3, "lo_mem_mb": 2048, "ocr_mem_mb": 2048},
+    "standard": {"heavy_global": 2, "ai_concurrency": 4, "lo_mem_mb": 2560, "ocr_mem_mb": 2560},
+    "large": {"heavy_global": 2, "ai_concurrency": 6, "lo_mem_mb": 3072, "ocr_mem_mb": 3072},
+    "small": {"heavy_global": 1, "ai_concurrency": 3, "lo_mem_mb": 2048, "ocr_mem_mb": 2048},
 }
-DEFAULT_PROFILE = "4c10g"
+# 旧名称（1.1.1 之前的 .env 可能还在用）
+PROFILE_ALIASES = {"4c10g": "standard", "4c24g": "large", "2c12g": "small"}
+DEFAULT_PROFILE = "standard"
 
 
 class Settings(BaseSettings):
@@ -63,8 +66,13 @@ class Settings(BaseSettings):
     debug: bool = False
 
     @property
+    def profile_name(self) -> str:
+        name = PROFILE_ALIASES.get(self.profile, self.profile)
+        return name if name in PROFILES else DEFAULT_PROFILE
+
+    @property
     def prof(self) -> dict:
-        return PROFILES.get(self.profile, PROFILES[DEFAULT_PROFILE])
+        return PROFILES[self.profile_name]
 
     @property
     def heavy_limit(self) -> int:
