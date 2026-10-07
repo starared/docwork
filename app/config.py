@@ -7,18 +7,21 @@ from pathlib import Path
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# 两套资源配置档：并发数量。内存上限写在 docker-compose.yml 中，通过同名变量引用。
+# 资源配置档：并发数量与单个外部进程的内存上限。各容器的内存上限写在 docker-compose.yml 中，通过同名变量引用。
+# 默认档 4c10g：整套服务共 10 GB 内存（各容器上限之和为 10240 MB）。
 PROFILES = {
+    "4c10g": {"heavy_global": 2, "ai_concurrency": 4, "lo_mem_mb": 2560, "ocr_mem_mb": 2560},
     "4c24g": {"heavy_global": 2, "ai_concurrency": 6, "lo_mem_mb": 3072, "ocr_mem_mb": 3072},
     "2c12g": {"heavy_global": 1, "ai_concurrency": 3, "lo_mem_mb": 2048, "ocr_mem_mb": 2048},
 }
+DEFAULT_PROFILE = "4c10g"
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="DW_", env_file=".env", extra="ignore")
 
     data_dir: Path = Path("/data")
-    profile: str = "4c24g"
+    profile: str = DEFAULT_PROFILE
     # 加密主密钥：用于加密存储的 API Key。部署时必须设置为随机值。
     master_key: str = Field(default="", description="32 字节以上随机字符串")
     # 对外访问地址（用于生成令牌链接），例如 https://doc.example.com
@@ -61,7 +64,7 @@ class Settings(BaseSettings):
 
     @property
     def prof(self) -> dict:
-        return PROFILES.get(self.profile, PROFILES["4c24g"])
+        return PROFILES.get(self.profile, PROFILES[DEFAULT_PROFILE])
 
     @property
     def heavy_limit(self) -> int:

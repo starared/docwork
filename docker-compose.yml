@@ -1,4 +1,5 @@
 # DocWork 部署（单机）。所有容器共用 /data（宿主机目录 ${DW_HOST_DATA}）。
+# 各容器内存上限的默认值按整套服务共 10 GB 分配（合计 10240 MB），可在 .env 中按服务器配置覆盖。
 # - web：对外提供网页，监听 ${DW_BIND}:${DW_PORT}。
 # - worker-ai：调用 OpenAI 兼容的模型接口，需要能访问该接口。
 # - 重负载 worker（渲染、转换、OCR、预览）：network_mode: none，完全没有网络；根文件系统只读。
@@ -30,7 +31,7 @@ services:
     build: .
     ports:
       - "${DW_BIND:-0.0.0.0}:${DW_PORT:-8000}:8000"
-    mem_limit: ${MEM_WEB:-1536m}
+    mem_limit: ${MEM_WEB:-1024m}
     security_opt: ["no-new-privileges:true"]
     cap_drop: [ALL]
     healthcheck:
@@ -44,7 +45,7 @@ services:
     command: ["python", "-m", "app.worker", "--queues", "ai"]
     # 模型接口在宿主机上时，地址写 http://host.docker.internal:端口/v1
     extra_hosts: ["host.docker.internal:host-gateway"]
-    mem_limit: ${MEM_AI:-1024m}
+    mem_limit: ${MEM_AI:-768m}
     security_opt: ["no-new-privileges:true"]
     cap_drop: [ALL]
     depends_on: [web]
@@ -52,31 +53,31 @@ services:
   worker-render:
     <<: *heavy
     command: ["python", "-m", "app.worker", "--queues", "render"]
-    mem_limit: ${MEM_RENDER:-2048m}
+    mem_limit: ${MEM_RENDER:-1792m}
     depends_on: [web]
 
   worker-convert:
     <<: *heavy
     command: ["python", "-m", "app.worker", "--queues", "convert"]
-    mem_limit: ${MEM_CONVERT:-3072m}
+    mem_limit: ${MEM_CONVERT:-2560m}
     depends_on: [web]
 
   worker-ocr:
     <<: *heavy
     command: ["python", "-m", "app.worker", "--queues", "ocr"]
-    mem_limit: ${MEM_OCR:-3072m}
+    mem_limit: ${MEM_OCR:-2560m}
     depends_on: [web]
 
   worker-preview:
     <<: *heavy
     command: ["python", "-m", "app.worker", "--queues", "preview"]
-    mem_limit: ${MEM_PREVIEW:-1536m}
+    mem_limit: ${MEM_PREVIEW:-1152m}
     depends_on: [web]
 
   scheduler:
     <<: *app
     command: ["python", "-m", "app.scheduler"]
-    mem_limit: ${MEM_SCHEDULER:-512m}
+    mem_limit: ${MEM_SCHEDULER:-384m}
     security_opt: ["no-new-privileges:true"]
     cap_drop: [ALL]
     depends_on: [web]

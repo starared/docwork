@@ -22,6 +22,7 @@
 - 前端会话失效时重新显示登录框，而不是跳到不存在的页面。
 
 ### 其他
+- 默认资源配置档改为 `4c10g`：整套服务按 10 GB 内存分配（各容器上限合计 10240 MB，重负载并发 2，AI 并发 4），`docker-compose.yml` 的默认值和 `.env.example` 同步调整；原有 `4c24g`、`2c12g` 保留可选。
 - 版本号 1.1.1；`.gitignore` 忽略 `.venv/`；Docker 镜像不再包含 `tests/`；新增 `tests/README.md`。
 - 清理若干无用代码；`jobs.SERIAL_KINDS` 去掉并非任务类型的 `restore`。
 
