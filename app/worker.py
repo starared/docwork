@@ -191,6 +191,11 @@ def main():
         else:
             log.error("沙箱：DW_SANDBOX=bwrap 但 bubblewrap 不可用，所有调用外部程序的任务都会失败")
         try:
+            # 队列划分变了（例如从 4 个重负载 worker 合并为 1 个）时，删掉覆盖相同队列的旧报告，后台不再显示过时的条目
+            for r in db.all_("SELECT key FROM meta WHERE key LIKE 'setting:sandbox_effective:%'"):
+                old_qs = r["key"].split(":", 2)[2].split(",")
+                if set(old_qs) & set(queues) and old_qs != queues:
+                    db.run("DELETE FROM meta WHERE key = ?", (r["key"],))
             db.set_setting(f"sandbox_effective:{','.join(queues)}", {"mode": eff, "configured": s.sandbox, "at": time.time()})
         except Exception:
             log.exception("记录沙箱状态失败")

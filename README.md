@@ -113,8 +113,10 @@ docker compose up -d
 更新到新版本：
 
 ```bash
-git pull && docker compose build && docker compose up -d
+git pull && docker compose build && docker compose up -d --remove-orphans
 ```
+
+`--remove-orphans` 会清理旧版本留下、新版本已不再使用的容器（例如 1.1.2 起渲染、转换、OCR、预览合并为一个 `worker-heavy`）。
 
 ## 功能
 

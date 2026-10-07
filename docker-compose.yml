@@ -1,9 +1,11 @@
 # DocWork 部署（单机）。所有容器共用 /data（宿主机目录 ${DW_HOST_DATA}）。
-# 各容器的 mem_limit 是封顶值而不是常驻占用，默认合计 10240 MB，可在 .env 中按机器情况覆盖。
+# 各容器的 mem_limit 是封顶值而不是常驻占用，默认合计 5248 MB，可在 .env 中按机器情况覆盖。
 # - web：对外提供网页，监听 ${DW_BIND}:${DW_PORT}。
 # - worker-ai：调用 OpenAI 兼容的模型接口，需要能访问该接口。
-# - 重负载 worker（渲染、转换、OCR、预览）：network_mode: none，完全没有网络；根文件系统只读。
-#   它们之间只通过 /data 中的 SQLite 队列协作，全局并发由认领任务时的数据库事务保证。
+# - worker-heavy：渲染、转换、OCR、预览四个重负载队列共用一个容器。network_mode: none，完全没有网络；
+#   根文件系统只读。同时运行的重负载任务数由配置档决定（standard 为 2），所以一个容器的封顶值
+#   按“2 个外部程序 + worker 本身”设置即可，不必为四类任务各留一份峰值。
+#   各容器只通过 /data 中的 SQLite 队列协作，全局并发由认领任务时的数据库事务保证。
 x-app: &app
   image: docwork:latest
   env_file: .env
@@ -50,28 +52,10 @@ services:
     cap_drop: [ALL]
     depends_on: [web]
 
-  worker-render:
+  worker-heavy:
     <<: *heavy
-    command: ["python", "-m", "app.worker", "--queues", "render"]
-    mem_limit: ${MEM_RENDER:-1792m}
-    depends_on: [web]
-
-  worker-convert:
-    <<: *heavy
-    command: ["python", "-m", "app.worker", "--queues", "convert"]
-    mem_limit: ${MEM_CONVERT:-2560m}
-    depends_on: [web]
-
-  worker-ocr:
-    <<: *heavy
-    command: ["python", "-m", "app.worker", "--queues", "ocr"]
-    mem_limit: ${MEM_OCR:-2560m}
-    depends_on: [web]
-
-  worker-preview:
-    <<: *heavy
-    command: ["python", "-m", "app.worker", "--queues", "preview"]
-    mem_limit: ${MEM_PREVIEW:-1152m}
+    command: ["python", "-m", "app.worker", "--queues", "render,convert,ocr,preview"]
+    mem_limit: ${MEM_HEAVY:-3072m}
     depends_on: [web]
 
   scheduler:
