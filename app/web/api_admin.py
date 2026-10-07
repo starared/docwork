@@ -8,7 +8,7 @@ from pathlib import Path
 import psutil
 
 from .. import accounts, db, jobs, models_cfg, quota, storage
-from ..config import get_settings
+from ..config import APP_VERSION, get_settings
 from ..util import UserError, now, safe_filename
 from .common import Req, api, page_args
 from .api_jobs import create_job
@@ -308,6 +308,7 @@ def system(req: Req):
         "ai_limit": s.ai_limit, "last_backup": db.get_setting("last_db_backup"), "last_restic": db.get_setting("last_restic"),
         "workers": db.all_("SELECT DISTINCT worker FROM jobs WHERE heartbeat_at > ?", (now() - 300,)),
         "ocr_engine": _ocr_engine(), "sandbox": s.sandbox, "sandbox_effective": _sandbox_effective(),
+        "version": APP_VERSION,
     }
 
 

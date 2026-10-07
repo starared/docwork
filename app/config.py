@@ -120,5 +120,7 @@ def reset_settings() -> None:
 
 APP_DIR = Path(__file__).resolve().parent
 STATIC_DIR = APP_DIR.parent / "static"
+# 程序版本（发布时同步打 Git 标签 v版本号）
+APP_VERSION = "1.1.0"
 RENDERER_VERSION = "1.0.0"
 SPEC_VERSION = 1

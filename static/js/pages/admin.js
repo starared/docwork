@@ -320,7 +320,7 @@ async function systemPage(box) {
         h('div', { class: 'card' }, h('div', { class: 'muted small' }, '内存'), h('div', { class: 'stat' }, `${s.memory.percent}%`), h('div', { class: 'muted small' }, `${fmtSize(s.memory.used)} / ${fmtSize(s.memory.total)}`)),
         h('div', { class: 'card' }, h('div', { class: 'muted small' }, '数据盘'), h('div', { class: 'stat ' + (s.disk.percent >= 90 ? 'error' : s.disk.percent >= 80 ? 'warn' : '') }, `${s.disk.percent}%`), h('div', { class: 'muted small' }, `${fmtSize(s.disk.used)} / ${fmtSize(s.disk.total)}`)),
         h('div', { class: 'card' }, h('div', { class: 'muted small' }, '24 小时内失败任务'), h('div', { class: 'stat ' + (s.failed_24h ? 'error' : '') }, s.failed_24h))),
-      h('div', { class: 'card' }, h('h2', {}, '队列'), h('p', { class: 'muted small' }, `资源配置档 ${s.profile}：重负载任务全局并发 ${s.heavy_limit}，AI 任务并发 ${s.ai_limit}；OCR 引擎：${s.ocr_engine}；沙箱配置：${s.sandbox}`),
+      h('div', { class: 'card' }, h('h2', {}, '队列'), h('p', { class: 'muted small' }, `DocWork ${s.version || ''}；资源配置档 ${s.profile}：重负载任务全局并发 ${s.heavy_limit}，AI 任务并发 ${s.ai_limit}；OCR 引擎：${s.ocr_engine}；沙箱配置：${s.sandbox}`),
         sandboxNote(s.sandbox_effective),
         s.queues.length ? table(['队列', '状态', '数量'], s.queues.map((q) => [QL[q.queue] || q.queue, q.status, q.n])) : h('p', { class: 'muted' }, '队列空闲'),
         h('p', { class: 'muted small' }, '最近 5 分钟活动的 worker：' + (s.workers.map((w) => w.worker).join('，') || '无'))),
