@@ -15,9 +15,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     SAL_USE_VCLPLUGIN=svp
 
 # 系统组件：LibreOffice（含 Math 以渲染 Word 公式）、中文与替代字体、Ghostscript、qpdf、Pandoc、
-# Tesseract（OCR 备用引擎）、bubblewrap（可用时作为额外沙箱）、restic（可选备份）
+# Tesseract（OCR 备用引擎）、bubblewrap（可用时作为额外沙箱）、restic（可选备份）、
+# python3-uno（系统 Python 的 UNO 接口，用于向常驻 LibreOffice 提交转换）
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libreoffice-core libreoffice-writer libreoffice-calc libreoffice-impress libreoffice-draw libreoffice-math \
+        python3-uno \
         fonts-noto-cjk fonts-noto-cjk-extra fonts-liberation2 fonts-crosextra-carlito fonts-crosextra-caladea \
         fonts-dejavu-core fonts-arphic-ukai fontconfig \
         ghostscript qpdf pandoc \

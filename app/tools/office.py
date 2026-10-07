@@ -2,6 +2,7 @@
 
 - 每个 worker 进程使用独立的用户配置目录（-env:UserInstallation），并行运行互不干扰。
 - 配置禁止执行宏，打开表格时总是重新计算公式。
+- 可用时优先交给常驻实例（lo_resident），失败再冷启动一个 soffice。
 """
 from __future__ import annotations
 
@@ -73,6 +74,12 @@ def convert(src: Path, target: str, outdir: Path, *, cancel: Callable[[], bool] 
     else:
         filt = TARGET_FILTERS.get(target, target)
         out_ext = target
+    from . import lo_resident
+
+    if lo_resident.enabled():
+        out = lo_resident.convert(src, filt, out_ext, outdir, cancel=cancel, timeout=timeout)
+        if out is not None:
+            return out
     prof = _profile()
     cmd = ["soffice", f"-env:UserInstallation=file://{prof}", "--headless", "--invisible", "--nologo", "--norestore",
            "--nodefault", "--nolockcheck", "--nofirststartwizard", "--convert-to", filt, "--outdir", str(outdir), str(src)]
