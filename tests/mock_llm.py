@@ -68,6 +68,8 @@ def respond(system: str, user) -> str:
         return "红色"
     if "幻灯片的渲染图" in u:
         return '{"ok": true, "problems": []}'
+    if "需要在搜索引擎中查找资料" in system:
+        return '{"queries": ["模拟检索一", "模拟检索二"]}'
     if "规划一份演示文稿的大纲" in system:
         return json.dumps(_outline(u), ensure_ascii=False)
     if "为演示文稿选择主题" in system:
@@ -102,6 +104,10 @@ def respond(system: str, user) -> str:
         if "equation" in (sec.get("elements") or []):
             blocks += [{"type": "equation", "latex": "E = mc^2", "number": True},
                        {"type": "table", "table": {"caption": "结果", "columns": ["x", "y"], "rows": [[1, 2], [3, 4]]}}]
+        m = re.search(r"来源：(http\S+/page/a)", u)
+        if m and sec["heading"] == "结论":
+            # 模拟模型不听话，把网络资料又写进参考文献
+            blocks.append({"type": "references", "items": [f"某作者. 网页甲[EB/OL]. {m.group(1)}.", "张三. 某本书[M]. 北京: 出版社, 2020."]})
         return json.dumps({"blocks": blocks}, ensure_ascii=False)
     if "制定分析方案" in system:
         name = re.search(r"数据表 (\S+)：", u).group(1)
@@ -139,6 +145,22 @@ class H(BaseHTTPRequestHandler):
             self.send_response(401)
             self.end_headers()
             self.wfile.write(b'{"error":"bad key"}')
+            return
+        if body.get("model") == "mock-chatimg":
+            # 只能通过对话接口出图的模型（类似经 new-api 转发的 Gemini 图像模型）
+            if self.path.endswith("/images/generations"):
+                self.send_response(503)
+                self.end_headers()
+                self.wfile.write(b'{"error":{"code":"model_not_found","message":"No available channel"}}')
+                return
+            from PIL import Image
+            im = Image.new("RGB", (640, 360), (30, 160, 90))
+            buf = io.BytesIO()
+            im.save(buf, "JPEG")
+            url = "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()
+            self._json({"choices": [{"message": {"role": "assistant", "content": None,
+                                                 "images": [{"type": "image_url", "image_url": {"url": url}}]}}],
+                        "usage": {"prompt_tokens": 20, "completion_tokens": 1290}})
             return
         if self.path.endswith("/images/generations"):
             from PIL import Image
@@ -179,6 +201,29 @@ class H(BaseHTTPRequestHandler):
             return
         if "/v1/search" in self.path:
             self._json({"photos": [{"src": {"large2x": f"http://127.0.0.1:{self.server.server_port}/img.png"}, "photographer": "测试"}]})
+            return
+        if self.path.startswith("/search?"):
+            # 模拟 SearXNG 的 JSON 接口：第二个结果是读不到的网页，应退回摘要
+            base = f"http://127.0.0.1:{self.server.server_port}"
+            self._json({"query": "q", "results": [
+                {"url": base + "/page/a", "title": "网页甲", "content": "甲的摘要"},
+                {"url": base + "/page/missing", "title": "网页乙", "content": "乙的摘要：增长 12%"},
+                {"url": "ftp://example.com/x", "title": "不是网页", "content": ""}]})
+            return
+        if self.path.startswith("/page/a") or self.path == "/redirect":
+            if self.path == "/redirect":
+                self.send_response(302)
+                self.send_header("Location", "/page/a")
+                self.end_headers()
+                return
+            data = ("<html><head><title>网页甲标题</title><script>var x=1;</script></head><body><nav>导航</nav>"
+                    "<article><h1>正文标题</h1><p>2025 年市场规模达到 3.2 万亿元，同比增长 8.5%。</p>"
+                    "<p>第二段：行业集中度继续提高。</p></article><footer>版权所有</footer></body></html>").encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
             return
         if self.path.endswith("/img.png"):
             from PIL import Image

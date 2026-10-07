@@ -34,9 +34,25 @@ def handle_extract(ctx: Ctx) -> dict:
     return {"text": res["text"], "images": images, "report": res.get("report", {}), "name": f["name"]}
 
 
-def gather_sources(ctx: Ctx, file_ids: list[str], lo: float, hi: float) -> tuple[str, list[dict]]:
-    """抽取所有资料；过长时分块摘要（保留数字与页码）。返回 (资料文字, 图片素材列表)。"""
-    if not file_ids:
+def collect_sources(ctx: Ctx, lo: float, hi: float) -> tuple[str, list[dict], list[dict], list[str]]:
+    """生成任务的资料：上传的文件，加上可选的网络资料（联网检索、用户给出的网址）。
+    返回 (资料文字, 图片素材列表, 网络参考列表, 提示信息)。"""
+    p = ctx.p
+    refs: list[dict] = []
+    notes: list[str] = []
+    web = ""
+    if p.get("web_search") or p.get("urls"):
+        from . import research
+        mid = lo + (hi - lo) * 0.5
+        web, refs, notes = research.web_sources(ctx, lo, mid)
+        lo = mid
+    text, images = gather_sources(ctx, p.get("file_ids") or [], lo, hi, extra=[web] if web else [])
+    return text, images, refs, notes
+
+
+def gather_sources(ctx: Ctx, file_ids: list[str], lo: float, hi: float, extra: list[str] = ()) -> tuple[str, list[dict]]:
+    """抽取所有资料（extra 为已有的资料文字）；过长时分块摘要（保留数字与页码）。返回 (资料文字, 图片素材列表)。"""
+    if not file_ids and not extra:
         return "", []
     texts, images = [], []
     for i, fid in enumerate(file_ids):
@@ -44,7 +60,7 @@ def gather_sources(ctx: Ctx, file_ids: list[str], lo: float, hi: float) -> tuple
         r = ctx.child("extract", f"extract_{fid}", {"file_id": fid})
         texts.append(f"# 资料：{r.get('name', '')}\n\n{r.get('text', '')}")
         images += r.get("images", [])
-    full = "\n\n".join(texts)
+    full = "\n\n".join(texts + list(extra))
     if estimate_tokens(full) <= MAX_SOURCE_TOKENS:
         return full, images
     # 分块摘要
@@ -71,8 +87,8 @@ def _chunks(text: str, tokens: int) -> list[str]:
     return out
 
 
-def source_block(text: str) -> str:
-    return f"<资料>\n{text}\n</资料>" if text else "（用户没有提供资料，只根据题目撰写；不要编造具体数据。）"
+def source_block(text: str, cite: str = "") -> str:
+    return f"{cite}<资料>\n{text}\n</资料>" if text else "（用户没有提供资料，只根据题目撰写；不要编造具体数据。）"
 
 
 # ---------- 配图 ----------

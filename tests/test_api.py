@@ -202,6 +202,9 @@ class TestAPI(DBTestCase):
         works.index(wid, "测试", "关于荧光探针的研究报告")
         self.assertEqual(o.get("/api/works?q=荧光探针").json()["total"], 1)
         self.assertEqual(o.get("/api/works?q=不存在的词").json()["total"], 0)
+        # 两个字的词：只出现在正文中也要能搜到
+        self.assertEqual(o.get("/api/works?q=荧光").json()["total"], 1)
+        self.assertEqual(o.get("/api/works?q=无关").json()["total"], 0)
 
     def test_job_cannot_target_foreign_work(self):
         """有生成权限的访客即使知道别人作品的 ID，也不能让生成、转换等任务写进那个作品。"""

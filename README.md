@@ -69,7 +69,11 @@
 
    保存后点“拉取模型”，勾选要用的模型（列表里没有的可以手动填写），然后在“角色分配”中给规划、写作、快速、视觉、图像生成分别指定模型。同一个模型可以担任多个角色，未指定的角色对应功能不可用。
 
-   接口需要支持 `/v1/chat/completions`；图像生成角色需要支持 `/v1/images/generations`；视觉角色需要模型支持图片输入。
+   接口需要支持 `/v1/chat/completions`；图像生成角色优先使用 `/v1/images/generations`，接口不支持时自动改用对话接口出图（适用于只能在对话中返回图片的模型，例如部分 Gemini 图像模型）；视觉角色需要模型支持图片输入。
+
+7. **联网检索（可选）**
+
+   生成 PPT 和 Word 时可以勾选“联网检索资料”，按题目搜索并读取网页作为资料，引用处标注来源。需要自部署 [SearXNG](https://github.com/searxng/searxng)，并在它的 `settings.yml` 中开启 JSON 输出（`search.formats` 加上 `json`），然后在 `.env` 中填写 `DW_SEARXNG_URL`，执行 `docker compose up -d`。不配置时仍可在生成页面直接填写参考网页。
 
 ## 资源配置
 

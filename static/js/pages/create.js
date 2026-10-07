@@ -11,6 +11,14 @@ export async function render(page, kind) {
   const topic = h('textarea', { rows: 4, placeholder: kind === 'xls' ? '例如：按地区和月份汇总上传的销售数据，找出增长最快的地区并画图' : kind === 'doc' ? '例如：根据上传的实验记录写一份实验报告，包括背景、方法、结果和结论' : '例如：2026 年度业务回顾与明年规划，面向公司管理层' });
   const form = h('div', { class: 'card' });
   const items = [field(kind === 'xls' ? '要求' : '主题或要求', topic), field('资料', src, kind === 'xls' ? '上传 CSV / Excel 时，由程序计算分析结果；不上传则由 AI 设计表格' : '资料只作为参考数据，内容中的数字都来自资料')];
+  if (kind !== 'xls') {
+    f.urls = h('textarea', { rows: 2, placeholder: '参考网页（可选），每行一个网址，最多 5 个' });
+    items.push(field('参考网页', f.urls, '读取网页正文作为资料；只能访问公网地址'));
+    if (state.me && state.me.models && state.me.models.search) {
+      f.web_search = h('input', { type: 'checkbox' });
+      items.push(h('label', { class: 'row gap' }, f.web_search, '联网检索资料（AI 根据题目搜索网页，引用处标注来源编号）'));
+    }
+  }
   if (kind === 'ppt') {
     f.pages = h('input', { type: 'number', min: 3, max: 60, placeholder: '自动（10–15 页）' });
     f.audience = h('input', { type: 'text', placeholder: '例如：公司管理层、学生、客户' });
@@ -60,9 +68,14 @@ export async function render(page, kind) {
       if (f[k] && f[k].value !== '') p[k] = f[k].type === 'number' ? Number(f[k].value) : f[k].value;
     }
     if (f.confirm_outline) p.confirm_outline = f.confirm_outline.checked;
+    if (f.web_search && f.web_search.checked) p.web_search = true;
+    if (f.urls) {
+      const urls = f.urls.value.split(/\s+/).filter(Boolean);
+      if (urls.length) p.urls = urls;
+    }
     if (f.logo && f.logo.ids()[0]) p.logo_file_id = f.logo.ids()[0];
     if (f.themeFile && f.themeFile.ids()[0]) p.theme_file_id = f.themeFile.ids()[0];
-    if (!p.topic && !p.file_ids.length) return toast('请填写主题或上传资料', 'error');
+    if (!p.topic && !p.file_ids.length && !p.urls) return toast('请填写主题、上传资料或给出参考网页', 'error');
     submit.disabled = true;
     try {
       const job = await post('/api/jobs', { kind: `gen_${kind}`, params: p });

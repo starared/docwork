@@ -35,6 +35,27 @@ class TestRegressions(DBTestCase):
         finally:
             db.set_setting('max_unzipped_mb', old)
 
+    def test_cond_format_count_per_rule(self):
+        """同一区域的多条条件格式规则合并在一个 conditionalFormatting 节点里，清点时按规则计数，不能误报缺失。"""
+        from openpyxl import Workbook
+        from openpyxl.formatting.rule import CellIsRule
+        from openpyxl.styles import PatternFill
+        from app.tools import ooxml
+        wb = Workbook()
+        ws = wb.active
+        fill = PatternFill(start_color="FF9999", end_color="FF9999", fill_type="solid")
+        ws.conditional_formatting.add("D26", CellIsRule(operator="lessThan", formula=["0"], fill=fill))
+        ws.conditional_formatting.add("D26", CellIsRule(operator="greaterThan", formula=["0"], fill=fill))
+        ws.conditional_formatting.add("E7:E25", CellIsRule(operator="greaterThan", formula=["0"], fill=fill))
+        out = self.tmp / "cf.xlsx"
+        wb.save(out)
+        self.assertEqual(ooxml.inventory(out)["cond_formats"], 3)
+
+    def test_continued_slide_title_follows_language(self):
+        from app.pipeline.ppt import _cont
+        self.assertEqual(_cont("Market overview"), "Market overview (cont.)")
+        self.assertEqual(_cont("市场概况"), "市场概况（续）")
+
     def test_blob_writes_are_thread_safe(self):
         from app import db, storage
         for kind in ('bytes', 'file', 'move'):

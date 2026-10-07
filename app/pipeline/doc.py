@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import time
 
 from pydantic import TypeAdapter, ValidationError
 
@@ -9,9 +10,10 @@ from .. import jobs
 from ..spec.document import PRESETS, Block, Document, document_text
 from ..util import estimate_tokens
 from . import prompts
-from .common import add_source_images, ensure_work, file_asset, gather_sources, render, resolve_images, save_version, source_block
+from .common import add_source_images, collect_sources, ensure_work, file_asset, render, resolve_images, save_version, source_block
 from .context import Ctx
 from .ppt import AWAITING, choose_theme
+from .research import citation_hint, ref_items
 
 _BLOCKS = TypeAdapter(list[Block])
 
@@ -21,14 +23,16 @@ def handle_gen_doc(ctx: Ctx):
     prev = ctx.job.get("result") or {}
     if prev.get("sources") is not None:
         sources, src_images = prev["sources"], prev.get("src_images", [])
+        web_refs, web_notes = prev.get("web_refs", []), prev.get("web_notes", [])
     else:
-        sources, src_images = gather_sources(ctx, p.get("file_ids") or [], 0.0, 0.15)
+        sources, src_images, web_refs, web_notes = collect_sources(ctx, 0.0, 0.15)
     outline = p.get("outline")
     if not outline:
         ctx.progress(0.17, "规划结构")
         outline = make_outline(ctx, sources)
         if p.get("confirm_outline"):
-            jobs.set_awaiting(ctx.id, {"outline": outline, "sources": sources, "src_images": src_images}, "文档结构已生成，请确认或修改后继续")
+            jobs.set_awaiting(ctx.id, {"outline": outline, "sources": sources, "src_images": src_images,
+                                       "web_refs": web_refs, "web_notes": web_notes}, "文档结构已生成，请确认或修改后继续")
             return AWAITING
     title = outline.get("title") or p.get("topic", "")[:40] or "文档"
     work_id = ensure_work(ctx, "doc", title)
@@ -47,13 +51,15 @@ def handle_gen_doc(ctx: Ctx):
         ctx.check()
         ctx.progress(0.2 + 0.55 * i / max(1, len(sections)), "撰写正文", f"第 {i + 1}/{len(sections)} 节：{sec.get('heading', '')}")
         prev_text = "\n".join(written[-2:])[-3000:]
-        user = (f"文档标题：{title}\n文档类型：{PRESETS[preset]}\n完整结构：\n"
+        user = (f"文档标题：{title}\n文档类型：{PRESETS[preset]}\n输出语言：{p.get('language') or '简体中文'}\n完整结构：\n"
                 + "\n".join(f"{'  ' * (s.get('level', 1) - 1)}- {s.get('heading', '')}" for s in sections)
                 + f"\n\n现在撰写：{json.dumps(sec, ensure_ascii=False)}\n"
                 + (f"前文结尾（用于衔接，不要重复）：\n{prev_text}\n" if prev_text else "")
                 + (f"可用图片素材：{json.dumps(avail, ensure_ascii=False)}\n" if avail else "")
                 + (f"用户的其他要求：{p.get('extra')}\n" if p.get("extra") else "")
-                + "\n" + source_block(src))
+                + (f"网络资料占用参考文献 [1]–[{len(web_refs)}]，程序会自动列在文末，不要为网络资料写 references 块；"
+                   f"其他文献从 [{len(web_refs) + 1}] 起编号。\n" if web_refs else "")
+                + "\n" + source_block(src, citation_hint(web_refs)))
 
         def validate(d, level=sec.get("level", 1)):
             if not isinstance(d, dict) or not isinstance(d.get("blocks"), list) or not d["blocks"]:
@@ -69,6 +75,15 @@ def handle_gen_doc(ctx: Ctx):
             got.insert(0, {"type": "heading", "level": sec.get("level", 1), "text": sec.get("heading", "")})
         blocks.extend(got)
         written.append("\n".join(b.get("text", "") for b in got if isinstance(b.get("text"), str)))
+    if web_refs:
+        # 网络资料排在参考文献最前面（与正文中的 [n] 对应），模型整理的其他文献接在后面
+        # 模型仍可能把网络资料再写一遍：网址已在网络资料中的条目去掉
+        urls = [r["url"].rstrip("/.") for r in web_refs]
+        others = [it for b in blocks if b.get("type") == "references" for it in b.get("items", [])
+                  if not any(u in it or u.split("?")[0] in it for u in urls)]
+        blocks = [b for b in blocks if b.get("type") != "references"]
+        blocks.append({"type": "references", "style": "gbt7714",
+                       "items": ref_items(web_refs, time.strftime("%Y-%m-%d")) + others})
     meta = outline.get("meta") or {}
     doc_d = {"title": title, "preset": preset, "meta": meta, "font_mode": p.get("font_mode", "system"),
              "header_text": p.get("header_text", "") or (title if preset in ("proposal", "manual") else ""), "blocks": blocks}
@@ -77,7 +92,7 @@ def handle_gen_doc(ctx: Ctx):
     doc = Document.model_validate(doc_d)
     ctx.progress(0.78, "配图")
     dd = doc.model_dump(mode="json")
-    notes = resolve_images(ctx, dd, assets, p.get("image_mode", "auto"), lo=0.78, hi=0.82)
+    notes = web_notes + resolve_images(ctx, dd, assets, p.get("image_mode", "auto"), lo=0.78, hi=0.82)
     doc = Document.model_validate(dd)
     theme = choose_theme(ctx, {"title": title}) if p.get("style") else None
     ctx.progress(0.83, "排版与导出")

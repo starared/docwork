@@ -27,9 +27,10 @@ TITLES = {"gen_ppt": "生成 PPT", "gen_doc": "生成 Word", "gen_xls": "生成 
           "ocr": "OCR 识别", "model_test": "测试模型接口", "compat_pack": "生成兼容性测试包", "file_pages": "页面缩略图"}
 ALLOWED_PARAMS = {
     "gen_ppt": {"topic", "file_ids", "pages", "audience", "purpose", "style", "language", "aspect", "font_mode", "logo_file_id",
-                "theme_preset", "theme_file_id", "image_mode", "confirm_outline", "footer", "image_file_ids", "extra"},
+                "theme_preset", "theme_file_id", "image_mode", "confirm_outline", "footer", "image_file_ids", "extra",
+                "web_search", "urls"},
     "gen_doc": {"topic", "file_ids", "preset", "pages", "audience", "language", "font_mode", "logo_file_id", "image_mode",
-                "confirm_outline", "header_text", "extra", "style"},
+                "confirm_outline", "header_text", "extra", "style", "web_search", "urls"},
     "gen_xls": {"topic", "file_ids", "extra"},
     "edit": {"instruction", "scope", "base_version_id", "image_mode"},
     "manual_edit": {"ops", "base_version_id"},
@@ -99,8 +100,16 @@ def create_job(s: accounts.Scope, kind: str, params: dict, work_id: str | None =
             p[key] = _files_in_scope(s, [p[key]])[0]
     title = TITLES[kind]
     if kind in ("gen_ppt", "gen_doc", "gen_xls"):
-        if not str(p.get("topic", "")).strip() and not p.get("file_ids"):
-            raise UserError("请填写主题或上传资料")
+        if "urls" in p:
+            from ..pipeline import research
+            p["urls"] = research.clean_urls(p["urls"])
+        if p.get("web_search"):
+            from ..pipeline import research
+            if not research.enabled():
+                raise UserError("管理员没有配置联网检索（DW_SEARXNG_URL）")
+            p["web_search"] = True
+        if not str(p.get("topic", "")).strip() and not p.get("file_ids") and not p.get("urls"):
+            raise UserError("请填写主题、上传资料或给出参考网页")
         p["topic"] = str(p.get("topic", ""))[:4000]
         if p.get("pages") is not None:
             try:

@@ -15,8 +15,9 @@ from ..spec.ops import get_path, set_path
 from ..util import UserError, estimate_tokens, new_id
 from . import prompts
 from .check import condense_ok
-from .common import (add_source_images, ensure_work, file_asset, gather_sources, render, resolve_images, save_version,
+from .common import (add_source_images, collect_sources, ensure_work, file_asset, render, resolve_images, save_version,
                      source_block)
+from .research import citation_hint
 from .context import Ctx
 
 AWAITING = object()
@@ -29,8 +30,10 @@ def handle_gen_ppt(ctx: Ctx):
     # 1. 资料
     if prev.get("sources") is not None:
         sources, src_images = prev["sources"], prev.get("src_images", [])
+        web_refs, web_notes = prev.get("web_refs", []), prev.get("web_notes", [])
     else:
-        sources, src_images = gather_sources(ctx, p.get("file_ids") or [], 0.0, 0.15)
+        sources, src_images, web_refs, web_notes = collect_sources(ctx, 0.0, 0.15)
+    ctx.web_refs = web_refs
     ctx.check()
     # 2. 大纲
     outline = p.get("outline")
@@ -38,7 +41,8 @@ def handle_gen_ppt(ctx: Ctx):
         ctx.progress(0.17, "规划大纲")
         outline = make_outline(ctx, sources)
         if p.get("confirm_outline"):
-            jobs.set_awaiting(ctx.id, {"outline": outline, "sources": sources, "src_images": src_images}, "大纲已生成，请确认或修改后继续")
+            jobs.set_awaiting(ctx.id, {"outline": outline, "sources": sources, "src_images": src_images,
+                                       "web_refs": web_refs, "web_notes": web_notes}, "大纲已生成，请确认或修改后继续")
             return AWAITING
     title = outline.get("title") or p.get("topic", "")[:30] or "演示文稿"
     work_id = ensure_work(ctx, "ppt", title)
@@ -56,11 +60,16 @@ def handle_gen_ppt(ctx: Ctx):
         deck_d["logo_asset"] = file_asset(p["logo_file_id"], assets)
     for rid in p.get("image_file_ids") or []:
         file_asset(rid, assets)
+    if web_refs and deck_d["slides"]:
+        # 网络资料的出处写在最后一页的演讲备注里
+        last = deck_d["slides"][-1]
+        last["notes"] = ((last.get("notes") or "") + "\n\n参考资料：\n"
+                         + "\n".join(f"[{r['n']}] {r['title']} {r['url']}" for r in web_refs)).strip()
     deck = Deck.model_validate(deck_d)
     # 5. 配图
     ctx.progress(0.6, "配图")
     dd = deck.model_dump(mode="json")
-    notes = resolve_images(ctx, dd, assets, p.get("image_mode", "auto"), lo=0.6, hi=0.7)
+    notes = web_notes + resolve_images(ctx, dd, assets, p.get("image_mode", "auto"), lo=0.6, hi=0.7)
     deck = Deck.model_validate(dd)
     # 6-8. 渲染、检查、修正
     deck, rendered, fix_log = render_and_fix(ctx, deck, assets, title, 0.7, 0.95)
@@ -91,7 +100,7 @@ def make_outline(ctx: Ctx, sources: str) -> dict:
         if n and abs(len(d["slides"]) - n) > 0:
             raise ValueError(f"页数应为 {n} 页，实际 {len(d['slides'])} 页")
         return d
-    return ctx.llm.json("planner", prompts.PPT_OUTLINE, user, validate=validate, stream=True, max_tokens=6000)
+    return ctx.llm.json("planner", prompts.PPT_OUTLINE, user, validate=validate, stream=True, max_tokens=12000)
 
 
 # ---------- 主题 ----------
@@ -172,12 +181,18 @@ def make_slides(ctx: Ctx, outline: dict, theme: Theme, sources: str, avail: list
         part = items[b * BATCH:(b + 1) * BATCH]
         start = b * BATCH
         ctx.progress(lo + (hi - lo) * b / nb, "编写页面", f"第 {start + 1}–{start + len(part)} 页")
-        user = (f"演示标题：{outline.get('title', '')}\n全部页面：\n{overview}\n\n"
+        lang = ctx.p.get("language") or "简体中文"
+        user = (f"演示标题：{outline.get('title', '')}\n输出语言：{lang}（标题、正文、备注都用这种语言）\n全部页面：\n{overview}\n\n"
                 f"本次需要编写第 {start + 1}–{start + len(part)} 页：\n{json.dumps(part, ensure_ascii=False, indent=1)}\n\n"
                 f"主题：{theme.name}（深色背景：{'是' if theme.background.upper() in ('#0F172A', '#111827') else '否'}）\n"
                 + (f"可用素材：{json.dumps(avail, ensure_ascii=False)}\n" if avail else "")
-                + "\n" + source_block(src))
+                + "\n" + source_block(src, citation_hint(getattr(ctx, "web_refs", []), "在该页的演讲备注（notes）中")))
         got = _slides_batch(ctx, user, part)
+        for s, item in zip(got, part):
+            # 页面标题以大纲为准：用户在确认大纲时可能改过，模型写页面时不应改写
+            t = str(item.get("title") or "").strip()
+            if t and len(t) <= 40 and s.get("layout") not in ("cover",):
+                s["title"] = t
         out.extend(got)
     return out
 
@@ -382,6 +397,8 @@ def _split_local(s: dict) -> list[dict] | None:
 
 
 def _cont(t: str) -> str:
+    if t and not any("\u4e00" <= ch <= "\u9fff" for ch in t):
+        return t[:33] + " (cont.)"
     return (t[:36] + "（续）") if t else "（续）"
 
 

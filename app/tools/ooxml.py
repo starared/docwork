@@ -64,7 +64,7 @@ def inventory(path: Path) -> dict:
         for n in names:
             if n.startswith("xl/worksheets/sheet") and n.endswith(".xml"):
                 s = z.read(n)
-                cf += s.count(b"<conditionalFormatting")
+                cf += s.count(b"<cfRule")  # 按规则计数：同一区域的多条规则在同一个 conditionalFormatting 节点中
                 dv += s.count(b"<dataValidation ")
                 merged += s.count(b"<mergeCell ")
             if n.startswith("xl/drawings/drawing") and n.endswith(".xml"):

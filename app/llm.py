@@ -272,6 +272,21 @@ class LLM:
         if not ep:
             raise UserError("尚未指定图像生成模型", 503, "no_model")
         self.check_cancel()
+        if (ep.get("capabilities") or {}).get("image_api") == "chat":
+            return self._image_via_chat(ep, prompt, size)
+        try:
+            return self._image_via_images(ep, prompt, size)
+        except LLMError as e:
+            # 有些图像模型（例如经 new-api 转发的 Gemini 图像模型）只能通过对话接口出图：
+            # 改用对话接口，成功后记到模型上，以后直接走对话接口
+            try:
+                data = self._image_via_chat(ep, prompt, size)
+            except LLMError:
+                raise e
+            _set_cap(ep, "image_api", "chat")
+            return data
+
+    def _image_via_images(self, ep: dict, prompt: str, size: str) -> bytes:
         body = {"model": ep["model"], "prompt": prompt, "n": 1, "size": (ep.get("extra") or {}).get("size", size)}
         if (ep.get("extra") or {}).get("b64", True):
             body["response_format"] = "b64_json"
@@ -288,7 +303,9 @@ class LLM:
                         body.pop("response_format", None)
                         continue
                     if r.status_code >= 400:
-                        if r.status_code == 429 or r.status_code >= 500:
+                        # 接口明确表示没有这个模型（例如 new-api 只给它配了对话接口）时不必重试
+                        unavailable = "model_not_found" in text or "No available channel" in text or "only supported" in text
+                        if (r.status_code == 429 or r.status_code >= 500) and not unavailable:
                             time.sleep(2 ** (attempt + 1))
                             continue
                         raise LLMError(f"图像生成失败（{r.status_code}）：{text[:200]}")
@@ -304,6 +321,71 @@ class LLM:
             except (httpx.TimeoutException, httpx.TransportError):
                 time.sleep(2 ** (attempt + 1))
         raise LLMError("图像生成接口多次失败")
+
+    def _image_via_chat(self, ep: dict, prompt: str, size: str) -> bytes:
+        """通过对话接口出图：图片在回复的 images 字段、多段内容或 Markdown 图片里。"""
+        try:
+            w, h = (int(x) for x in str(size).lower().split("x", 1))
+        except ValueError:
+            w = h = 1
+        shape = "wide landscape (16:9)" if w > h * 1.2 else ("tall portrait (9:16)" if h > w * 1.2 else "square (1:1)")
+        body = {"model": ep["model"], "messages": [{"role": "user", "content":
+                f"Generate an image: {prompt}\nAspect ratio: {shape}. Do not put any text, captions or watermarks in the image."}]}
+        headers = {"Authorization": f"Bearer {ep.get('api_key', '')}", "Content-Type": "application/json"}
+        url = _url(ep["base_url"], "/chat/completions")
+        last = "图像生成接口多次失败"
+        for attempt in range(3):
+            self.check_cancel()
+            try:
+                with _client(240) as c:
+                    with c.stream("POST", url, headers=headers, json=body) as r:
+                        raw = _read_limited(r, IMAGE_RESPONSE_MAX)
+                text = raw.decode("utf-8", "replace")
+                if r.status_code == 429 or r.status_code >= 500:
+                    last = f"图像生成失败（{r.status_code}）：{text[:200]}"
+                    time.sleep(2 ** (attempt + 1))
+                    continue
+                if r.status_code >= 400:
+                    raise LLMError(f"图像生成失败（{r.status_code}）：{text[:200]}")
+                d = json.loads(text)
+                data = self._image_from_message(((d.get("choices") or [{}])[0]).get("message") or {})
+                if not data:
+                    raise LLMError("模型没有返回图片")
+                if len(data) > IMAGE_MAX:
+                    raise LLMError("生成的图片过大")
+                usage = d.get("usage") or {}
+                self._record(ep, "image", usage.get("prompt_tokens") or estimate_tokens(prompt),
+                             usage.get("completion_tokens") or 0, not usage, images=1)
+                return data
+            except (httpx.TimeoutException, httpx.TransportError) as e:
+                last = f"图像生成接口连接失败：{type(e).__name__}"
+                time.sleep(2 ** (attempt + 1))
+            except (ValueError, KeyError, IndexError, AttributeError):
+                raise LLMError("图像生成接口返回的内容无法解析")
+        raise LLMError(last)
+
+    def _image_from_message(self, msg: dict) -> bytes | None:
+        urls: list[str] = []
+        for im in msg.get("images") or []:
+            if isinstance(im, dict):
+                u = (im.get("image_url") or {}).get("url") if isinstance(im.get("image_url"), dict) else im.get("image_url")
+                urls.append(u or im.get("url") or "")
+            elif isinstance(im, str):
+                urls.append(im)
+        content = msg.get("content")
+        if isinstance(content, list):
+            for part in content:
+                if isinstance(part, dict) and part.get("type") == "image_url":
+                    iu = part.get("image_url")
+                    urls.append(iu.get("url", "") if isinstance(iu, dict) else str(iu or ""))
+        elif isinstance(content, str):
+            urls += re.findall(r"!\[[^\]]*\]\(\s*(data:image/[^)\s]+|https?://[^)\s]+)", content)
+        for u in urls:
+            if u.startswith("data:image/") and ";base64," in u:
+                return base64.b64decode(u.split(";base64,", 1)[1])
+            if u.startswith(("http://", "https://")):
+                return self.download(u, max_bytes=IMAGE_MAX)
+        return None
 
     # ---------- 图库 ----------
 

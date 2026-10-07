@@ -48,9 +48,9 @@ def works_list(req: Req):
             conds.append("w.id IN (SELECT work_id FROM works_fts WHERE works_fts MATCH ?)")
             args.append('"' + q.replace('"', '""') + '"')
         else:
-            # trigram 需要至少 3 个字符：短词退回标题模糊匹配
-            conds.append("(w.title LIKE ? OR w.id IN (SELECT work_id FROM works_fts WHERE body LIKE ?))")
-            args += [f"%{q}%", f"%{q}%"]
+            # trigram 需要至少 3 个字符，且对短于 3 个字符的 LIKE 直接返回空结果：短词逐条查找正文
+            conds.append("(w.title LIKE ? OR w.id IN (SELECT work_id FROM works_fts WHERE instr(lower(body), lower(?)) > 0))")
+            args += [f"%{q}%", q]
     limit, offset = page_args(req)
     order = {"updated": "w.updated_at DESC", "created": "w.created_at DESC", "title": "w.title"}.get(req.q("sort", "updated"), "w.updated_at DESC")
     rows = db.all_(f"SELECT w.* FROM works w WHERE {' AND '.join(conds)} ORDER BY {order} LIMIT ? OFFSET ?", args + [limit, offset])

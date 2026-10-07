@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 from . import db, security
+from .config import get_settings
 from .util import UserError, new_id, now
 
 KINDS = {"openai": "OpenAI 兼容接口", "stock": "图库"}
@@ -252,4 +253,5 @@ def status() -> dict:
         "vision": bool(vision) and ((vision.get("capabilities") or {}).get("vision", True) is not False),
         "image": bool(image) and ((image.get("capabilities") or {}).get("image", True) is not False),
         "stock": bool(stock) and ((stock.get("capabilities") or {}).get("ok", True) is not False),
+        "search": bool(get_settings().searxng_url),
     }

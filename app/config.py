@@ -50,6 +50,10 @@ class Settings(BaseSettings):
     # 登录与兑换限流
     login_rate_per_10min: int = 10
     redeem_rate_per_10min: int = 20
+    # 可选：SearXNG 地址（例如 http://searxng:8080，需开启 JSON 输出），用于生成时联网检索资料
+    searxng_url: str = ""
+    # 联网检索时最多读取的网页数量
+    web_pages: int = 6
     # 可选：restic 备份仓库（留空则只做本地数据库备份）
     restic_repository: str = ""
     restic_password: str = ""
