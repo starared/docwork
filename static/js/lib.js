@@ -38,6 +38,8 @@ export const $ = (sel, root = document) => root.querySelector(sel);
 
 export const state = { me: null, meta: null };
 
+export function csrfToken() { return csrf(); }
+
 function csrf() {
   const m = document.cookie.match(/(?:^|; )dw_csrf=([^;]+)/);
   return (state.me && state.me.csrf) || (m ? decodeURIComponent(m[1]) : '');
@@ -136,39 +138,81 @@ export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ---------- 任务 ----------
 
-export function watchJob(jobId, onUpdate) {
-  // SSE 推送；断线时退回轮询
-  let closed = false;
-  let es = null;
-  let timer = null;
-  const final = (j) => ['done', 'failed', 'cancelled', 'awaiting_input'].includes(j.status);
-  const poll = async () => {
-    if (closed) return;
-    try {
-      const j = await api(`/api/jobs/${jobId}`);
-      onUpdate(j);
-      if (final(j)) { closed = true; return; }
-    } catch (e) {
-      // 任务不存在或无权查看：不再无限等待，按失败结束（网络错误等则稍后重试）
-      if ([401, 403, 404].includes(e.status)) { closed = true; onUpdate({ id: jobId, status: 'failed', error: e.message }); return; }
-    }
-    timer = setTimeout(poll, 1500);
+// 一个页面只开一条推送流：所有任务卡片共用 /api/jobs/events?ids=…，关注的任务变化时重开连接。
+// 浏览器对同一域名只给 6 条 HTTP/1.1 连接，每张卡片各开一条流会把其它请求卡住。
+// 推送不可用时退回批量轮询（一次请求查全部任务），30 秒后再尝试推送。
+const feed = { subs: new Map(), es: null, timer: null, pollTimer: null, polling: false, polls: 0 };
+
+function feedIds() { return [...feed.subs.keys()]; }
+
+function feedDispatch(j) {
+  const set = feed.subs.get(j.id);
+  if (!set) return;
+  const done = ['done', 'failed', 'cancelled', 'awaiting_input'].includes(j.status);
+  if (done) feed.subs.delete(j.id);
+  for (const cb of [...set]) { try { cb(j); } catch (e) { console.error(e); } }
+  if (done) feedSchedule();
+}
+
+function feedSchedule() {
+  clearTimeout(feed.timer);
+  feed.timer = setTimeout(feedOpen, 30);
+}
+
+function feedClose() {
+  if (feed.es) { feed.es.close(); feed.es = null; }
+  clearTimeout(feed.pollTimer);
+  feed.pollTimer = null;
+}
+
+function feedOpen() {
+  feedClose();
+  const ids = feedIds();
+  if (!ids.length) return;
+  if (feed.polling) { feedPoll(); return; }
+  let es;
+  try { es = new EventSource(`/api/jobs/events?ids=${ids.map(encodeURIComponent).join(',')}`); } catch (e) { feed.polling = true; feedPoll(); return; }
+  feed.es = es;
+  es.addEventListener('job', (ev) => feedDispatch(JSON.parse(ev.data)));
+  es.addEventListener('denied', () => { feedClose(); for (const id of feedIds()) feedDispatch({ id, status: 'failed', error: '登录已失效' }); });
+  es.onerror = () => {
+    if (feed.es !== es) return;
+    feedClose();
+    if (!feedIds().length) return;
+    feed.polling = true;
+    feed.polls = 0;
+    feedPoll();
   };
+}
+
+async function feedPoll() {
+  const ids = feedIds();
+  if (!ids.length) { feed.polling = false; return; }
   try {
-    es = new EventSource(`/api/jobs/${jobId}/events`);
-    es.addEventListener('job', (ev) => {
-      const j = JSON.parse(ev.data);
-      onUpdate(j);
-      if (final(j)) { closed = true; es.close(); }
-    });
-    es.onerror = () => {
-      if (closed) return;
-      es.close();
-      es = null;
-      if (!timer) poll();
-    };
-  } catch (e) { poll(); }
-  return () => { closed = true; if (es) es.close(); if (timer) clearTimeout(timer); };
+    const r = await api(`/api/jobs?ids=${ids.map(encodeURIComponent).join(',')}`);
+    const got = new Set();
+    for (const j of r.items) { got.add(j.id); feedDispatch(j); }
+    // 不存在或无权查看的任务：按失败结束，不再无限等待
+    for (const id of ids) if (!got.has(id) && feed.subs.has(id)) feedDispatch({ id, status: 'failed', error: '任务不存在或无权查看' });
+  } catch (e) {
+    if ([401, 403].includes(e.status)) { for (const id of feedIds()) feedDispatch({ id, status: 'failed', error: e.message }); return; }
+  }
+  if (!feedIds().length) { feed.polling = false; return; }
+  if (++feed.polls >= 20) { feed.polling = false; feedSchedule(); return; }  // 轮询约 30 秒后再试推送
+  feed.pollTimer = setTimeout(feedPoll, 1500);
+}
+
+export function watchJob(jobId, onUpdate) {
+  let set = feed.subs.get(jobId);
+  if (!set) { set = new Set(); feed.subs.set(jobId, set); }
+  set.add(onUpdate);
+  feedSchedule();
+  return () => {
+    const cur = feed.subs.get(jobId);
+    if (!cur) return;
+    cur.delete(onUpdate);
+    if (!cur.size) { feed.subs.delete(jobId); feedSchedule(); }
+  };
 }
 
 export const JOB_STATUS = {

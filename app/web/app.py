@@ -117,7 +117,8 @@ def build() -> Starlette:
         R("/api/works/{wid}/transfer", wk.work_transfer, methods=["POST"]), R("/api/works/{wid}/copy", wk.work_copy, methods=["POST"]),
         R("/api/versions/{vid}/star", wk.version_star, methods=["POST"]),
         # 任务
-        R("/api/jobs", jb.jobs_list), R("/api/jobs", jb.job_create, methods=["POST"]), R("/api/jobs/{jid}", jb.job_get),
+        R("/api/jobs", jb.jobs_list), R("/api/jobs", jb.job_create, methods=["POST"]),
+        R("/api/jobs/events", jb.jobs_events), R("/api/jobs/{jid}", jb.job_get),
         R("/api/jobs/{jid}/cancel", jb.job_cancel, methods=["POST"]), R("/api/jobs/{jid}/retry", jb.job_retry, methods=["POST"]),
         R("/api/jobs/{jid}/continue", jb.job_continue, methods=["POST"]), R("/api/jobs/{jid}/events", jb.job_events),
         # 后台

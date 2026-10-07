@@ -92,6 +92,7 @@ def handle_import_file(ctx: Ctx) -> dict:
     title = ctx.p.get("title") or Path(f["name"]).stem
     ctx.progress(0.5, "生成预览")
     prev = ctx.child("preview", "preview", {"sha": sha, "name": f"{title}.{kind}"})
+    _content_hashes(kind, path, units, prev["pages"])
     report = import_report(kind, units, inv, notes)
     work_id = works.create_work(ctx.workspace_id, IMPORT_KIND[kind], title, source="import", origin_file_id=f["id"])
     db.update("jobs", {"id": ctx.id}, {"work_id": work_id})
@@ -102,6 +103,30 @@ def handle_import_file(ctx: Ctx) -> dict:
     v = works.add_version(work_id, job_id=ctx.id, source="import", message=f"导入 {f['name']}", file_sha=sha,
                           manifest=manifest, title=title, search_text=text)
     return {"work_id": work_id, "version_id": v["id"], "report": report}
+
+
+def _content_hashes(kind: str, path: Path, units: list[dict], pages: list[dict]) -> list[str] | None:
+    """PPT 每页内容的哈希（文字、表格、图表数据、备注），写入页面清单的 hash 字段。
+    版本对比和“已修改”标记据此判断，而不是比较预览图像素。页数与幻灯片数不一致时（隐藏页等）保留图像哈希。"""
+    if kind != "pptx":
+        return None
+    try:
+        from pptx import Presentation
+        n = len(Presentation(path).slides)
+    except Exception:
+        return None
+    if n != len(pages):
+        return None
+    import hashlib
+    per: dict[int, list] = {}
+    for u in units:
+        per.setdefault(int(u.get("slide") or 0), []).append({k: u.get(k) for k in ("id", "text", "categories", "series") if k in u})
+    out = []
+    for i, p in enumerate(pages, 1):
+        h = hashlib.sha256(json.dumps(per.get(i, []), ensure_ascii=False, sort_keys=True).encode()).hexdigest()[:24]
+        p["hash"] = h
+        out.append(h)
+    return out
 
 
 def import_report(kind: str, units: list[dict], inv: dict, notes: list[str]) -> dict:
@@ -123,7 +148,7 @@ def handle_import_edit(ctx: Ctx) -> dict:
     w, cur = _base(ctx)
     kind = (cur["manifest"] or {}).get("file_kind") or w["kind"].replace("import_", "")
     src = storage.materialize(cur["file_sha"], ctx.tmp / "in", f"src.{kind}")
-    units = inplace.units_for(kind, src)
+    units = all_units = inplace.units_for(kind, src)
     scope = ctx.p.get("scope") or {"type": "all"}
     if not isinstance(scope, dict) or scope.get("type", "all") not in ("all", "slides", "units"):
         raise UserError("不支持的修改范围")
@@ -188,14 +213,20 @@ def handle_import_edit(ctx: Ctx) -> dict:
     sha, size = storage.put_file(dst)
     ctx.progress(0.75, "生成预览")
     prev = ctx.child("preview", "preview", {"sha": sha, "name": dst.name})
-    old_pages = {p["hash"]: p for p in (cur["manifest"] or {}).get("pages", [])}
-    changed = [p["id"] for p in prev["pages"] if p["hash"] not in old_pages]
+    units2 = inplace.units_for(kind, dst)
+    old_hashes = _content_hashes(kind, src, all_units, [dict(p) for p in (cur["manifest"] or {}).get("pages", [])])
+    new_hashes = _content_hashes(kind, dst, units2, prev["pages"])
+    if old_hashes and new_hashes and len(old_hashes) == len(new_hashes) and not any(o.get("op") in ("delete_slide", "duplicate_slide", "move_slide") for o in all_ops):
+        # PPT：按每页内容判断哪些页变了。预览图的像素哈希随 LibreOffice 版本、字体而变，不能用来判断
+        changed = [p["id"] for p, a, b in zip(prev["pages"], old_hashes, new_hashes) if a != b]
+    else:
+        old_pages = {p["hash"] for p in (cur["manifest"] or {}).get("pages", [])}
+        changed = [p["id"] for p in prev["pages"] if p["hash"] not in old_pages]
     man = dict(cur["manifest"])
     man.update({"exports": {kind: {"sha": sha, "size": size, "name": dst.name}, "pdf": prev["pdf"]}, "pages": prev["pages"],
                 "inventory": after, "warnings": [f"元素变化：{w_}" for w_ in warns] + res["skipped"],
                 "reply": "；".join(replies), "track_changes": bool(ctx.p.get("track_changes"))})
     man = works._strip_file_ids(man)
-    units2 = inplace.units_for(kind, dst)
     v = works.add_version(w["id"], job_id=ctx.id, source="inplace", message=instr, file_sha=sha, manifest=man, changed=changed,
                           base_version_id=cur["id"], search_text="\n".join(u.get("text", "") for u in units2))
     return {"work_id": w["id"], "version_id": v["id"], "applied": res["applied"], "skipped": res["skipped"],

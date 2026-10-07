@@ -342,6 +342,57 @@ class TestAPI(DBTestCase):
         finally:
             api_jobs.SSE_AUTH_RECHECK = old
 
+    def test_jobs_events_multi_and_batch_poll(self):
+        """一条推送流关注多个任务；无权查看的任务被忽略；批量轮询接口返回同样的快照。"""
+        from app import jobs
+        o = self.owner()
+        g, tok = self.guest(o, note="多任务")
+        ws = g.get("/api/me").json()["workspace_id"]
+        a = jobs.enqueue("convert", ws, {}, token_id=tok["item"]["id"])
+        b = jobs.enqueue("convert", ws, {}, token_id=tok["item"]["id"])
+        other = jobs.enqueue("convert", o.get("/api/me").json()["workspace_id"], {})
+        # 先让两个任务结束，推送才会在发完快照后关闭（测试客户端要等响应结束）
+        for j in (a, b):
+            jobs.claim(["convert"], "w")
+        jobs.finish(a["id"], {"x": 1})
+        jobs.fail(b["id"], "测试失败")
+        r = g.get(f"/api/jobs/events?ids={a['id']},{b['id']},{other['id']},j_missing")
+        self.assertEqual(r.status_code, 200)
+        import json
+        datas = [json.loads(ln[5:]) for ln in r.text.splitlines() if ln.startswith("data:") and ln[5:].strip() != "{}"]
+        self.assertEqual(sorted(d["id"] for d in datas), sorted([a["id"], b["id"]]), "只推送自己能看的任务")
+        self.assertEqual({d["id"]: d["status"] for d in datas}, {a["id"]: "done", b["id"]: "failed"})
+        # 批量轮询
+        r = g.get(f"/api/jobs?ids={a['id']},{other['id']}")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual([x["id"] for x in r.json()["items"]], [a["id"]])
+        self.assertEqual(r.json()["items"][0]["result"], {"x": 1})
+        # 全部无权查看：404
+        self.assertEqual(g.get(f"/api/jobs/events?ids={other['id']}").status_code, 404)
+        self.assertEqual(g.get("/api/jobs/events").status_code, 400)
+
+    def test_works_list_summary_and_version_reply(self):
+        """作品列表带版本摘要和导出文件；版本列表带模型答复。"""
+        from app import storage, works
+        o = self.owner()
+        ws = o.get("/api/me").json()["workspace_id"]
+        wid = works.create_work(ws, "ppt", "摘要测试")
+        sha, size = storage.put_bytes(b"pptx-bytes")
+        psha, psize = storage.put_bytes(b"png-bytes")
+        man = {"title": "摘要测试", "exports": {"pptx": {"sha": sha, "size": size, "name": "摘要测试.pptx"}},
+               "pages": [{"id": "s1", "hash": "h1", "preview": psha, "size": psize}], "issues": [{"status": "unresolved"}, {"status": "fixed"}]}
+        works.add_version(wid, job_id=None, source="generate", spec={"title": "x", "slides": []}, manifest=man)
+        works.add_version(wid, job_id=None, source="chat", message="改标题", spec={"title": "y", "slides": []},
+                          manifest=dict(man, reply="已把标题改为 y"))
+        item = next(w for w in o.get("/api/works").json()["items"] if w["id"] == wid)
+        self.assertEqual((item["version"], item["pages"], item["issues"]), (2, 1, 1))
+        self.assertTrue(item["thumb"])
+        self.assertEqual(item["exports"]["pptx"]["name"], "摘要测试.pptx")
+        self.assertTrue(item["exports"]["pptx"]["file_id"])
+        vs = o.get(f"/api/works/{wid}/versions").json()["items"]
+        self.assertEqual([v["reply"] for v in vs], ["已把标题改为 y", ""])
+        self.assertNotIn("manifest", vs[0])
+
     def test_zip_entry_names_sanitized(self):
         import io
         import zipfile

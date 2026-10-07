@@ -35,8 +35,9 @@ class Settings(BaseSettings):
     accel_redirect: bool = False
     accel_prefix: str = "/_protected"
     # 可信反向代理（逗号分隔的地址或网段）：只有直连地址在其中时才读取 X-Real-IP / X-Forwarded-For。
-    # 默认是本机和 Docker 常用网段（宿主机 Nginx 经 Docker 网关连入容器）。
-    trusted_proxies: str = "127.0.0.1/32,::1/128,172.16.0.0/12,192.168.0.0/16,10.0.0.0/8"
+    # 默认只有本机和 Docker 网段（宿主机 Nginx 经 Docker 网关连入容器）。不包含 10.0.0.0/8 和 192.168.0.0/16：
+    # 直接部署在局域网时这些是普通用户的地址，信任它们会让局域网用户伪造来源地址绕过登录限流。
+    trusted_proxies: str = "127.0.0.1/32,::1/128,172.16.0.0/12"
     # 沙箱模式：auto（能用 bubblewrap 就用）、bwrap、rlimit
     sandbox: str = "auto"
     heavy_global: int | None = None

@@ -1,4 +1,4 @@
-import { api, clear, confirmDialog, del, empty, errToast, fileUrl, fmtTime, h, isOwner, patch, post, select, tabs, toast } from '../lib.js';
+import { api, clear, confirmDialog, csrfToken, del, empty, errToast, fileUrl, fmtTime, h, isOwner, patch, post, select, tabs, toast } from '../lib.js';
 
 const KIND_ICON = { ppt: 'PPT', doc: 'W', xls: 'X', import_pptx: 'PPT', import_docx: 'W', import_xlsx: 'X' };
 
@@ -28,7 +28,7 @@ export function workCard(w, { selectable = false, selected, onToggle, trash = fa
 
 export async function render(page) {
   const st = { kind: '', q: '', folder: '', tag: '', starred: false, trash: false, sort: 'updated', offset: 0, all: false };
-  const selected = new Set();
+  const selected = new Map();  // id → 列表项（打包下载直接用列表里的导出文件信息）
   const q = h('input', { type: 'search', placeholder: '搜索标题和正文', style: { maxWidth: '260px' } });
   const folderSel = h('select', { style: { maxWidth: '160px' } });
   const tagSel = h('select', { style: { maxWidth: '160px' } });
@@ -76,7 +76,7 @@ export async function render(page) {
     if (!r.items.length && reset) grid.append(empty(st.trash ? '回收站是空的' : '没有找到作品'));
     for (const w of r.items) {
       grid.append(workCard(w, { selectable: !st.trash, selected: selected.has(w.id), trash: st.trash, onChanged: () => load(true),
-        onToggle: (on) => { if (on) selected.add(w.id); else selected.delete(w.id); drawBulk(); } }));
+        onToggle: (on) => { if (on) selected.set(w.id, w); else selected.delete(w.id); drawBulk(); } }));
     }
     st.offset += r.items.length;
     clear(more, st.offset < r.total ? h('button', { class: 'btn', onclick: () => load(false) }, `加载更多（共 ${r.total} 个）`) : null);
@@ -94,14 +94,13 @@ export async function render(page) {
 
   async function bulkDownload() {
     const ids = [];
-    for (const wid of selected) {
-      const w = await api(`/api/works/${wid}`);
-      const ex = (w.version && w.version.manifest.exports) || {};
+    for (const w of selected.values()) {
+      const ex = w.exports || {};
       const main = ex.pptx || ex.docx || ex.xlsx || ex.pdf;
       if (main && main.file_id) ids.push(main.file_id);
     }
     if (!ids.length) return toast('所选作品没有可下载的文件');
-    const r = await fetch('/api/files/zip', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': (await api('/api/me')).csrf }, body: JSON.stringify({ file_ids: ids }) });
+    const r = await fetch('/api/files/zip', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken() }, body: JSON.stringify({ file_ids: ids }) });
     if (!r.ok) return toast('打包失败', 'error');
     const blob = await r.blob();
     const a = h('a', { href: URL.createObjectURL(blob), download: '作品打包.zip' });
@@ -111,14 +110,14 @@ export async function render(page) {
   async function bulkFolder() {
     const name = prompt('文件夹名称（留空表示移出文件夹）', st.folder || '');
     if (name === null) return;
-    for (const wid of selected) await patch(`/api/works/${wid}`, { folder: name });
+    for (const wid of selected.keys()) await patch(`/api/works/${wid}`, { folder: name });
     toast('已移动');
     load(true);
   }
 
   async function bulkTrash() {
     if (!(await confirmDialog('删除作品', `把选中的 ${selected.size} 个作品移到回收站？回收站中的作品保留 30 天。`, '删除', true))) return;
-    for (const wid of selected) await del(`/api/works/${wid}`);
+    for (const wid of selected.keys()) await del(`/api/works/${wid}`);
     toast('已移到回收站');
     load(true);
   }

@@ -1,5 +1,5 @@
 // 入口：身份检查、令牌兑换、路由、外框。
-import { $, api, clear, errToast, h, isOwner, post, state, toast } from './lib.js';
+import { $, api, ApiError, clear, errToast, h, isOwner, post, state, toast } from './lib.js';
 import * as home from './pages/home.js';
 import * as create from './pages/create.js';
 import * as worksPage from './pages/works.js';
@@ -157,5 +157,15 @@ async function route() {
   }
   clear(main, h('div', { class: 'page' }, h('div', { class: 'empty' }, '页面不存在')));
 }
+
+// 按钮里的 async 处理函数出错时统一提示，而不是静默失败（会话失效由 api() 处理，这里不重复提示）
+window.addEventListener('unhandledrejection', (e) => {
+  const err = e.reason;
+  if (err instanceof ApiError && err.status === 401) { e.preventDefault(); return; }
+  if (err instanceof ApiError || (err && typeof err.message === 'string' && !(err instanceof TypeError))) {
+    errToast(err);
+    e.preventDefault();
+  }
+});
 
 boot();

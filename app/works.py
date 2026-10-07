@@ -33,10 +33,31 @@ def current_version(work_id: str) -> dict | None:
 
 
 def list_versions(work_id: str) -> list[dict]:
-    rows = db.all_("SELECT id, number, source, message, starred, created_at, changed, base_version_id, job_id FROM versions WHERE work_id=? ORDER BY number DESC", (work_id,))
+    rows = db.all_("SELECT id, number, source, message, starred, created_at, changed, base_version_id, job_id, manifest "
+                   "FROM versions WHERE work_id=? ORDER BY number DESC", (work_id,))
     for r in rows:
         r["changed"] = db.jload(r["changed"], [])
+        # 对话修改时模型的答复保存在清单里，编辑器重新打开时据此恢复对话记录
+        r["reply"] = str((db.jload(r.pop("manifest"), {}) or {}).get("reply") or "")
     return rows
+
+
+def version_summaries(version_ids: list[str]) -> dict[str, dict]:
+    """作品列表需要的版本摘要：版本号、缩略图、页数、未解决的排版问题数、导出文件。只读清单，不读规格。"""
+    ids = [v for v in dict.fromkeys(version_ids) if v]
+    out: dict[str, dict] = {}
+    for i in range(0, len(ids), 500):
+        part = ids[i:i + 500]
+        rows = db.all_(f"SELECT id, number, manifest FROM versions WHERE id IN ({','.join('?' for _ in part)})", part)
+        for r in rows:
+            m = db.jload(r["manifest"], {}) or {}
+            pages = m.get("pages") or []
+            exports = {k: {"file_id": e["file_id"], "name": e.get("name", "")}
+                       for k, e in (m.get("exports") or {}).items() if isinstance(e, dict) and e.get("file_id")}
+            out[r["id"]] = {"version": r["number"], "thumb": pages[0].get("file_id") if pages else None, "pages": len(pages),
+                            "issues": sum(1 for x in m.get("issues", []) if x.get("status") not in ("fixed", "visual_ok")),
+                            "exports": exports}
+    return out
 
 
 def add_version(work_id: str, *, job_id: str | None, source: str, message: str = "", spec: dict | None = None,

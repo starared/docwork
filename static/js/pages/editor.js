@@ -95,6 +95,7 @@ export async function render(page, workId) {
       return;
     }
     const kind = S.work.kind;
+    S.stageBox = null;
     let left, center;
     if (kind === 'ppt') [left, center] = pptViews();
     else if (kind === 'doc') [left, center] = docViews();
@@ -104,18 +105,40 @@ export async function render(page, workId) {
   }
 
   // ----- PPT -----
+  // 缩略图列表和舞台分开渲染：点选只切换 class（updateSel），换页只重画舞台（renderStage），
+  // 不重建整个编辑器，避免全部页面图重新加载和滚动位置丢失。
   function pptViews() {
     const pages = man().pages || [];
     const changed = new Set(S.version.changed || []);
     const issueSlides = new Set(unresolved().map((i) => i.slide));
-    const idx = Math.max(0, pages.findIndex((p) => p.id === S.active));
     const left = h('div', { class: 'ed-left thumbs' }, pages.map((p, i) => h('div', {
-      class: 'th' + (p.id === S.active ? ' sel' : '') + (changed.has(p.id) ? ' changed' : '') + (issueSlides.has(p.id) ? ' issue' : ''),
-      style: S.selSlides.has(p.id) ? { outline: '3px solid var(--primary)', outlineOffset: '1px' } : null,
+      class: 'th' + (changed.has(p.id) ? ' changed' : '') + (issueSlides.has(p.id) ? ' issue' : ''),
+      dataset: { id: p.id },
       onclick: (e) => {
         if (e.ctrlKey || e.metaKey || e.shiftKey) { toggle(S.selSlides, p.id); S.selElems.clear(); }
-        S.active = p.id; draw();
+        setActive(p.id);
       } }, pageImg(p, `第 ${i + 1} 页`), h('span', { class: 'n' }, i + 1))));
+    const stageBox = h('div', { class: 'col', style: { alignItems: 'center', gap: '14px', width: '100%' } });
+    const center = h('div', { class: 'ed-center', tabindex: 0, onclick: () => { if (S.selElems.size) { S.selElems.clear(); updateSel(); } },
+      onkeydown: (e) => {
+        const idx = pages.findIndex((p) => p.id === S.active);
+        if (e.key === 'ArrowDown' || e.key === 'PageDown') { if (idx < pages.length - 1) setActive(pages[idx + 1].id); }
+        if (e.key === 'ArrowUp' || e.key === 'PageUp') { if (idx > 0) setActive(pages[idx - 1].id); }
+      } }, stageBox, warningsBox());
+    S.stageBox = stageBox;
+    renderStage();
+    return [left, center];
+  }
+
+  function setActive(id) {
+    if (S.active !== id) { S.active = id; renderStage(); }
+    updateSel();
+  }
+
+  function renderStage() {
+    if (!S.stageBox || S.work.kind !== 'ppt') return;
+    const pages = man().pages || [];
+    const idx = Math.max(0, pages.findIndex((p) => p.id === S.active));
     const cur = pages[idx];
     const size = man().size || { w: 13.333, h: 7.5 };
     const stage = h('div', { class: 'stage', style: { width: `min(100%, ${Math.round(900 * size.w / 13.333)}px)` } });
@@ -127,27 +150,46 @@ export async function render(page, workId) {
         const key = `${cur.id}|${e.id}`;
         const [x, y, w, hgt] = e.box;
         stage.append(h('div', {
-          class: 'ovl' + (S.selElems.has(key) ? ' sel' : '') + (issueEls.has(e.id) ? ' issue' : ''),
+          class: 'ovl' + (issueEls.has(e.id) ? ' issue' : ''),
+          dataset: { key },
           title: labelOf(e.id) + (readonly() ? '' : '（单击选中，双击直接编辑）'),
           style: { left: `${x * 100}%`, top: `${y * 100}%`, width: `${w * 100}%`, height: `${hgt * 100}%` },
-          onclick: (ev) => { ev.stopPropagation(); if (!(ev.ctrlKey || ev.metaKey)) S.selElems.clear(); toggle(S.selElems, key); S.selSlides.clear(); draw(); },
+          onclick: (ev) => { ev.stopPropagation(); if (!(ev.ctrlKey || ev.metaKey)) S.selElems.clear(); toggle(S.selElems, key); S.selSlides.clear(); updateSel(); },
           ondblclick: (ev) => { ev.stopPropagation(); if (!readonly()) editPptElement(cur.id, e); },
         }));
       }
     }
     const nav = h('div', { class: 'row gap' },
-      h('button', { class: 'btn small', disabled: idx <= 0 || null, onclick: () => { S.active = pages[idx - 1].id; draw(); } }, '上一页'),
+      h('button', { class: 'btn small', disabled: idx <= 0 || null, onclick: () => setActive(pages[idx - 1].id) }, '上一页'),
       h('span', { class: 'muted' }, `${idx + 1} / ${pages.length}`),
-      h('button', { class: 'btn small', disabled: idx >= pages.length - 1 || null, onclick: () => { S.active = pages[idx + 1].id; draw(); } }, '下一页'),
-      !readonly() && cur ? h('button', { class: 'btn small ghost', onclick: () => { toggle(S.selSlides, cur.id); S.selElems.clear(); draw(); } }, S.selSlides.has(cur.id) ? '取消选中本页' : '选中本页') : null);
+      h('button', { class: 'btn small', disabled: idx >= pages.length - 1 || null, onclick: () => setActive(pages[idx + 1].id) }, '下一页'),
+      !readonly() && cur ? h('button', { class: 'btn small ghost', dataset: { role: 'selpage' }, onclick: () => { toggle(S.selSlides, cur.id); S.selElems.clear(); updateSel(); } }, '选中本页') : null);
     const slideSpec = cur && (S.version.spec.slides || []).find((s) => s.id === cur.id);
     const notes = slideSpec && slideSpec.notes ? h('div', { class: 'card', style: { width: 'min(100%, 900px)' } }, h('div', { class: 'muted small' }, '演讲备注'), h('div', {}, slideSpec.notes)) : null;
-    const center = h('div', { class: 'ed-center', tabindex: 0, onclick: () => { if (S.selElems.size) { S.selElems.clear(); draw(); } },
-      onkeydown: (e) => {
-        if (e.key === 'ArrowDown' || e.key === 'PageDown') { if (idx < pages.length - 1) { S.active = pages[idx + 1].id; draw(); } }
-        if (e.key === 'ArrowUp' || e.key === 'PageUp') { if (idx > 0) { S.active = pages[idx - 1].id; draw(); } }
-      } }, nav, stage, notes, warningsBox());
-    return [left, center];
+    clear(S.stageBox, nav, stage, notes);
+    updateSel();
+  }
+
+  // 只更新选中状态相关的 class，不重建 DOM
+  function updateSel() {
+    const isPpt = S.work.kind === 'ppt';
+    for (const th of root.querySelectorAll('.thumbs .th')) {
+      const id = th.dataset.id;
+      th.classList.toggle('sel', isPpt && id === S.active);
+      const on = S.selSlides.has(id);
+      th.style.outline = on ? '3px solid var(--primary)' : '';
+      th.style.outlineOffset = on ? '1px' : '';
+    }
+    for (const o of root.querySelectorAll('.ovl')) o.classList.toggle('sel', S.selElems.has(o.dataset.key));
+    for (const it of root.querySelectorAll('.outline .it')) it.classList.toggle('sel', S.selBlocks.has(it.dataset.id));
+    const b = root.querySelector('[data-role=selpage]');
+    if (b) b.textContent = S.selSlides.has(S.active) ? '取消选中本页' : '选中本页';
+    drawScope();
+  }
+
+  function clearSel() {
+    S.selElems.clear(); S.selSlides.clear(); S.selBlocks.clear(); S.range = null;
+    if (S.work.kind === 'xls') draw(); else updateSel();
   }
 
   function labelOf(path) {
@@ -225,13 +267,13 @@ export async function render(page, workId) {
       blocks.map((b) => {
         const label = b.text || (b.table && b.table.caption) || b.caption || b.latex || ({ toc: '目录', page_break: '分页', references: '参考文献', image: '图片', chart: '图表', table: '表格', list: '列表' }[b.type]) || b.type;
         const cls = b.type === 'heading' ? `l${b.level}` : 'blk';
-        return h('div', { class: `it ${cls}` + (S.selBlocks.has(b.id) ? ' sel' : '') + (changed.has(b.id) ? ' changed' : ''), title: label,
+        return h('div', { class: `it ${cls}` + (S.selBlocks.has(b.id) ? ' sel' : '') + (changed.has(b.id) ? ' changed' : ''), title: label, dataset: { id: b.id },
           onclick: (e) => {
             if (!(e.ctrlKey || e.metaKey)) S.selBlocks.clear();
             toggle(S.selBlocks, b.id);
+            updateSel();
             const pg = bp[b.id];
-            draw();
-            if (pg) setTimeout(() => { const el = root.querySelectorAll('.docpage')[pg.page]; if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 30);
+            if (pg) { const el = pageEls[pg.page]; if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
           },
           ondblclick: () => { if (!readonly()) editDocBlock(b); } },
         b.type === 'heading' ? '' : '· ', label.slice(0, 40));
@@ -350,8 +392,9 @@ export async function render(page, workId) {
     const left = h('div', { class: 'ed-left thumbs' }, pages.map((p, i) => h('div', {
       class: 'th' + (changed.has(p.id) ? ' changed' : ''),
       style: S.selSlides.has(p.id) ? { outline: '3px solid var(--primary)', outlineOffset: '1px' } : null,
+      dataset: { id: p.id },
       onclick: () => {
-        if (isPptx && !readonly()) { toggle(S.selSlides, p.id); drawScope(); draw(); }
+        if (isPptx && !readonly()) { toggle(S.selSlides, p.id); updateSel(); }
         const el = root.querySelectorAll('.docpage')[i]; if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
       } }, pageImg(p), h('span', { class: 'n' }, i + 1))));
     const rep = man().report || {};
@@ -393,7 +436,7 @@ export async function render(page, workId) {
     const sc = scope();
     const label = { all: '整份文档', slides: `选中的 ${(sc.ids || []).length} 页`, elements: `选中的 ${(sc.ids || []).length} 个元素`, blocks: `选中的 ${(sc.ids || []).length} 段内容`, range: `区域 ${sc.range}` }[sc.type];
     clear(scopeBox, h('span', { class: 'muted small' }, '修改范围：'), h('span', { class: 'chip' }, label),
-      sc.type !== 'all' ? h('button', { class: 'icon-btn small', title: '清除选择', onclick: () => { S.selElems.clear(); S.selSlides.clear(); S.selBlocks.clear(); S.range = null; draw(); } }, '×') : null);
+      sc.type !== 'all' ? h('button', { class: 'icon-btn small', title: '清除选择', onclick: clearSel }, '×') : null);
   }
 
   const chat = h('div', { class: 'chat' });
@@ -423,9 +466,15 @@ export async function render(page, workId) {
   async function loadHistory() {
     try {
       const vs = await api(`/api/works/${workId}/versions`);
-      S.history = vs.items.slice().reverse().filter((v) => ['chat', 'inplace', 'manual', 'restore', 'generate', 'import'].includes(v.source)).map((v) =>
-        ({ me: ['chat', 'inplace'].includes(v.source), text: v.source === 'generate' ? '生成了第 1 版' : v.source === 'import' ? '导入文件' : v.source === 'manual' ? '直接编辑' : v.source === 'restore' ? v.message : v.message,
-          meta: `第 ${v.number} 版 · ${fmtTime(v.created_at)}` }));
+      S.history = [];
+      for (const v of vs.items.slice().reverse()) {
+        if (!['chat', 'inplace', 'manual', 'restore', 'generate', 'import'].includes(v.source)) continue;
+        const me = ['chat', 'inplace'].includes(v.source);
+        S.history.push({ me, text: v.source === 'generate' ? '生成了第 1 版' : v.source === 'import' ? '导入文件' : v.source === 'manual' ? '直接编辑' : v.message,
+          meta: `第 ${v.number} 版 · ${fmtTime(v.created_at)}` });
+        // 对话修改时模型的答复也保存在版本里，重新打开作品后仍然可见
+        if (me && v.reply) S.history.push({ me: false, text: v.reply });
+      }
     } catch (e) { S.history = []; }
   }
 
@@ -463,7 +512,7 @@ export async function render(page, workId) {
         if (r.no_change) toast('没有需要修改的内容');
         S.selElems.clear(); S.selBlocks.clear(); S.range = null;
         await loadHistory();
-        if (r.reply) S.history.push({ me: false, text: r.reply });
+        if (r.reply && r.no_change) S.history.push({ me: false, text: r.reply });
         await load();
         toast('已更新', 'ok');
       } else if (j.status === 'failed') {
@@ -533,7 +582,7 @@ export async function render(page, workId) {
     modal('排版问题', h('div', {},
       h('p', { class: 'muted small' }, '系统已自动精简文字、缩小字号或拆页两轮，以下问题仍未解决。可以点击跳转到对应页面，用对话或直接编辑处理。'),
       h('ul', { class: 'issues' }, unresolved().map((i) => h('li', {},
-        h('a', { href: '#', onclick: (e) => { e.preventDefault(); if (i.slide) { S.active = i.slide; S.selElems.clear(); if (i.element) S.selElems.add(`${i.slide}|${i.element}`); draw(); } } },
+        h('a', { href: '#', onclick: (e) => { e.preventDefault(); if (i.slide) { S.selElems.clear(); if (i.element) S.selElems.add(`${i.slide}|${i.element}`); setActive(i.slide); } } },
           i.slide ? `第 ${pages.indexOf(i.slide) + 1} 页` : '文档'), '：', i.message, i.status ? h('span', { class: 'badge warn', style: { marginLeft: '6px' } }, st[i.status] || i.status) : null,
         (i.vision || []).length ? h('div', { class: 'muted small' }, '视觉复查：' + i.vision.join('；')) : null)))), { wide: true });
   }

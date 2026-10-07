@@ -53,7 +53,7 @@ def main():
 
         # 1. 登录
         page.goto(BASE)
-        page.get_by_text("主人登录").click()
+        page.get_by_text("管理员登录").click()
         page.get_by_placeholder("用户名").fill("admin")
         page.get_by_placeholder("密码", exact=True).fill("password1234")
         page.get_by_role("button", name="登录").click()

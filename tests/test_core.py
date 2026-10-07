@@ -257,6 +257,9 @@ class TestHardening(DBTestCase):
         self.assertEqual(client_ip(self._req("172.18.0.1", {"X-Real-IP": "not-an-ip"})), "172.18.0.1")
         # 172.x 中不属于私有网段的公网地址不被当作代理
         self.assertEqual(client_ip(self._req("172.67.1.1", {"X-Real-IP": "9.9.9.9"})), "172.67.1.1")
+        # 直接部署在局域网时 10.x / 192.168.x 是普通用户，默认不当作代理：伪造的来源地址不生效
+        self.assertEqual(client_ip(self._req("10.0.0.5", {"X-Real-IP": "9.9.9.9"})), "10.0.0.5")
+        self.assertEqual(client_ip(self._req("192.168.1.20", {"X-Real-IP": "9.9.9.9"})), "192.168.1.20")
 
     def test_sandbox_mode_reported(self):
         import os

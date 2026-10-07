@@ -176,8 +176,28 @@ def job_create(req: Req):
     return create_job(req.s, str(req.b("kind", "")), req.b("params") or {}, req.b("work_id"), req.ip)
 
 
+MAX_WATCH = 100  # 一个页面同时关注的任务数上限（推送与批量轮询）
+
+
+def _watch_ids(req: Req) -> list[str]:
+    ids = [x.strip() for x in str(req.q("ids", "")).split(",") if x.strip()]
+    return list(dict.fromkeys(ids))[:MAX_WATCH]
+
+
 @api(auth="any")
 def jobs_list(req: Req):
+    if req.q("ids") is not None:
+        # 批量查询指定任务（推送不可用时前端一次轮询一个页面上的全部任务）；无权查看的任务不返回
+        out = []
+        for jid in _watch_ids(req):
+            try:
+                accounts.get_job_scoped(req.s, jid)
+            except UserError:
+                continue
+            cur = _snapshot(jid)
+            if cur:
+                out.append(cur)
+        return {"items": out}
     limit, offset = page_args(req)
     conds, args = ["parent_id IS NULL"], []
     if not (req.s.is_owner and req.q("all") == "1"):
@@ -254,25 +274,57 @@ SSE_AUTH_RECHECK = 5  # 秒：推送过程中复查会话与令牌授权的间�
 
 @api(auth="any", raw_body=True)
 async def job_events(req: Req):
-    """SSE：任务状态变化时推送；每 15 秒发送心跳；任务结束后关闭。"""
+    """SSE：单个任务状态变化时推送（旧接口，保留兼容）。"""
     j = await run_in_threadpool(accounts.get_job_scoped, req.s, req.path["jid"])
-    jid = j["id"]
+    return _sse(req, [j["id"]])
 
+
+@api(auth="any", raw_body=True)
+async def jobs_events(req: Req):
+    """SSE：一个连接推送多个任务（?ids=a,b,c）。浏览器对同一域名的连接数有限，
+    一个页面只开一条流，页面上的任务卡片都从这条流取更新。无权查看的任务直接忽略。"""
+    ids = _watch_ids(req)
+    if not ids:
+        raise UserError("缺少任务 ID")
+
+    def allowed() -> list[str]:
+        out = []
+        for jid in ids:
+            try:
+                accounts.get_job_scoped(req.s, jid)
+                out.append(jid)
+            except UserError:
+                pass
+        return out
+    ok = await run_in_threadpool(allowed)
+    if not ok:
+        raise UserError("任务不存在", 404, "not_found")
+    return _sse(req, ok)
+
+
+def _sse(req: Req, ids: list[str]) -> StreamingResponse:
+    """每 0.6 秒查一次这些任务（一条 SQL），有变化才推送；每 15 秒心跳；
+    会话或令牌失效时发送 denied 并结束；全部任务结束后关闭。"""
     cookie = req.request.cookies.get(SESSION_COOKIE)
 
-    def still_allowed() -> bool:
+    def still_allowed() -> list[str]:
         # 连接建立后仍然按当前会话和令牌状态复查：撤销、到期、退出登录后立即结束推送
         sc = accounts.session_scope(cookie)
         if sc is None:
-            return False
-        try:
-            accounts.get_job_scoped(sc, jid)
-            return True
-        except UserError:
-            return False
+            return []
+        out = []
+        for jid in ids:
+            try:
+                accounts.get_job_scoped(sc, jid)
+                out.append(jid)
+            except UserError:
+                pass
+        return out
 
     async def gen():
-        last = None
+        nonlocal ids
+        last: dict[str, tuple] = {}
+        finished: set[str] = set()
         last_beat = time.time()
         last_auth = time.time()
         while True:
@@ -280,25 +332,52 @@ async def job_events(req: Req):
                 break
             if time.time() - last_auth > SSE_AUTH_RECHECK:
                 last_auth = time.time()
-                if not await run_in_threadpool(still_allowed):
+                ids = await run_in_threadpool(still_allowed)
+                if not ids:
                     yield "event: denied\ndata: {}\n\n"
                     break
-            cur = await run_in_threadpool(_snapshot, jid)
-            if cur is None:
-                break
-            key = (cur["updated_at"], cur["status"], cur["progress"], len(cur["stream"]))
-            if key != last:
-                last = key
-                yield f"event: job\ndata: {json.dumps(cur, ensure_ascii=False)}\n\n"
-                last_beat = time.time()
+            snaps = await run_in_threadpool(_snapshot_many, ids)
+            sent = False
+            for cur in snaps:
+                key = (cur["updated_at"], cur["status"], cur["progress"], len(cur["stream"]))
+                if key != last.get(cur["id"]):
+                    last[cur["id"]] = key
+                    yield f"event: job\ndata: {json.dumps(cur, ensure_ascii=False)}\n\n"
+                    sent = True
                 if cur["status"] in jobs.FINAL or cur["status"] == "awaiting_input":
-                    break
-            elif time.time() - last_beat > 15:
+                    finished.add(cur["id"])
+            got = {c["id"] for c in snaps}
+            finished |= {jid for jid in ids if jid not in got}  # 已删除的任务
+            if sent:
+                last_beat = time.time()
+            if all(jid in finished for jid in ids):
+                break
+            if not sent and time.time() - last_beat > 15:
                 yield ": ping\n\n"
                 last_beat = time.time()
             await asyncio.sleep(0.6)
     return StreamingResponse(gen(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "Connection": "keep-alive"})
+
+
+def _snapshot_many(ids: list[str]) -> list[dict]:
+    if not ids:
+        return []
+    marks = ",".join("?" for _ in ids)
+    rows = db.all_(f"SELECT * FROM jobs WHERE id IN ({marks})", ids)
+    kids = db.all_(f"SELECT parent_id, stage, message, status, progress FROM jobs WHERE parent_id IN ({marks}) "
+                   "AND status IN ('running','queued') ORDER BY created_at", ids)
+    child: dict[str, dict] = {}
+    for k in kids:  # 同一父任务取最新的一个
+        child[k["parent_id"]] = {x: k[x] for x in ("stage", "message", "status", "progress")}
+    out = []
+    for r in rows:
+        pj = jobs.public(jobs._decode(r))
+        pj["result"] = _slim_result(pj["result"])
+        if r["id"] in child:
+            pj["child"] = child[r["id"]]
+        out.append(pj)
+    return out
 
 
 def _snapshot(jid: str) -> dict | None:
