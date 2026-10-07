@@ -12,7 +12,7 @@ from ..render.theme import PRESET_THEMES, normalize_theme, preset_theme
 from ..spec.common import Theme
 from ..spec.deck import Deck, Slide, deck_text
 from ..spec.ops import get_path, set_path
-from ..util import UserError, estimate_tokens, new_id
+from ..util import estimate_tokens, new_id
 from . import prompts
 from .check import condense_ok
 from .common import (add_source_images, collect_sources, ensure_work, file_asset, render, resolve_images, save_version,

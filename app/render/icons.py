@@ -160,8 +160,5 @@ def _mode(s, mode: str, color: str, size: int) -> None:
 
 
 def _round_cap(shape) -> None:
-    from pptx.oxml.ns import qn
-
     ln = shape.line._get_or_add_ln()
     ln.set("cap", "rnd")
-    _ = qn

@@ -37,20 +37,15 @@ def put_file(src: Path | str, move: bool = False) -> tuple[str, int]:
     size = src.stat().st_size
     dst = blob_path(sha)
     if not dst.exists():
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        tmp = dst.with_name(dst.name + f".{os.getpid()}.{uuid.uuid4().hex}.tmp")
-        try:
-            if move:
-                shutil.move(str(src), tmp)
-            else:
-                shutil.copyfile(src, tmp)
-            tmp.chmod(0o644)  # 宿主机 Nginx 需要读取内容文件
-            os.replace(tmp, dst)
-        finally:
-            tmp.unlink(missing_ok=True)
-    elif move:
+        _write_blob(dst, lambda tmp: shutil.move(str(src), tmp) if move else shutil.copyfile(src, tmp))
+        _register_blob(sha, size)
+        return sha, size
+    _register_blob(sha, size)
+    if not dst.exists():
+        # 垃圾回收在"看到文件已存在"与"登记引用"之间删掉了旧内容：重新写入
+        _write_blob(dst, lambda tmp: shutil.copyfile(src, tmp))
+    if move:
         src.unlink(missing_ok=True)
-    db.run("INSERT OR IGNORE INTO blobs(sha, size, created_at) VALUES(?,?,?)", (sha, size, now()))
     return sha, size
 
 
@@ -58,16 +53,28 @@ def put_bytes(data: bytes) -> tuple[str, int]:
     sha = hashlib.sha256(data).hexdigest()
     dst = blob_path(sha)
     if not dst.exists():
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        tmp = dst.with_name(dst.name + f".{os.getpid()}.{uuid.uuid4().hex}.tmp")
-        try:
-            tmp.write_bytes(data)
-            tmp.chmod(0o644)
-            os.replace(tmp, dst)
-        finally:
-            tmp.unlink(missing_ok=True)
-    db.run("INSERT OR IGNORE INTO blobs(sha, size, created_at) VALUES(?,?,?)", (sha, len(data), now()))
+        _write_blob(dst, lambda tmp: tmp.write_bytes(data))
+        _register_blob(sha, len(data))
+        return sha, len(data)
+    _register_blob(sha, len(data))
+    if not dst.exists():
+        _write_blob(dst, lambda tmp: tmp.write_bytes(data))
     return sha, len(data)
+
+
+def _write_blob(dst: Path, writer) -> None:
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dst.with_name(dst.name + f".{os.getpid()}.{uuid.uuid4().hex}.tmp")
+    try:
+        writer(tmp)
+        tmp.chmod(0o644)  # 宿主机 Nginx 需要读取内容文件
+        os.replace(tmp, dst)
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+def _register_blob(sha: str, size: int) -> None:
+    db.run("INSERT OR IGNORE INTO blobs(sha, size, created_at) VALUES(?,?,?)", (sha, size, now()))
 
 
 def read_bytes(sha: str) -> bytes:

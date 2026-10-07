@@ -1,21 +1,22 @@
 """联网资料：SearXNG 检索 + 抓取网页正文，作为生成时的参考资料。
 
 - 检索词由快速模型根据题目给出（失败时直接用题目）；用户也可以直接给出网址。
-- 抓取网页只允许公网地址：每一跳（包括重定向）都解析域名并拒绝内网、本机、保留地址，防止借此访问内部服务。
+- 抓取网页只允许公网地址：每一跳（包括重定向）都解析域名并拒绝内网、本机、保留地址，并直接连接校验过的 IP
+  （防止 DNS 重绑定），见 tools/netfetch。
 - 只读取 HTML 和纯文本，限制大小；读不到正文时退回检索结果的摘要。
 - 每条网络资料带编号 [n]，生成时可按编号标注来源；Word 末尾自动附参考文献。
 """
 from __future__ import annotations
 
-import ipaddress
+import http.client
 import re
-import socket
 from concurrent.futures import ThreadPoolExecutor
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import urlsplit
 
 import httpx
 
 from ..config import get_settings
+from ..tools import netfetch
 from ..util import UserError
 from . import prompts
 from .context import Ctx
@@ -80,46 +81,27 @@ def plan_queries(ctx: Ctx) -> list[str]:
 # ---------- 抓取 ----------
 
 def _check_host(host: str, port: int | None) -> None:
-    try:
-        infos = socket.getaddrinfo(host, port or 443, type=socket.SOCK_STREAM)
-    except socket.gaierror:
-        raise UserError("域名无法解析")
-    for info in infos:
-        ip = ipaddress.ip_address(info[4][0].split("%")[0])
-        if not ip.is_global and not ALLOW_PRIVATE:
-            raise UserError("不允许访问内网地址")
+    netfetch.resolve_public(host, port or 443, allow_private=ALLOW_PRIVATE)
 
 
 def fetch(url: str) -> tuple[str, str]:
-    """抓取网页，返回 (标题, 正文)。逐跳检查地址，最多 5 次重定向。"""
+    """抓取网页，返回 (标题, 正文)。逐跳检查地址并固定连接到校验过的 IP，最多 5 次重定向。"""
     # 按维基百科等网站的爬虫规范，User-Agent 写明程序名和联系地址（伪装成通用浏览器或爬虫标识会被拒绝）
     ua = f"DocWork/1.0 (+{get_settings().public_url})"
-    with httpx.Client(timeout=httpx.Timeout(15, connect=8), follow_redirects=False,
-                      headers={"User-Agent": ua, "Accept": "text/html,text/plain;q=0.9"}) as c:
-        for _ in range(6):
-            parts = urlsplit(url)
-            if parts.scheme not in ("http", "https") or not parts.hostname:
-                raise UserError("网址无效")
-            _check_host(parts.hostname, parts.port)
-            with c.stream("GET", url) as r:
-                if r.is_redirect:
-                    url = urljoin(url, r.headers.get("location", ""))
-                    continue
-                if r.status_code >= 400:
-                    raise UserError(f"网页返回 {r.status_code}")
-                ctype = r.headers.get("content-type", "").lower()
-                if not ctype.startswith(("text/html", "application/xhtml", "text/plain")):
-                    raise UserError("不是网页（" + (ctype.split(";")[0] or "未知类型") + "）")
-                buf = bytearray()
-                for chunk in r.iter_bytes():
-                    buf.extend(chunk)
-                    if len(buf) > PAGE_MAX:
-                        break
-                raw, charset = bytes(buf), r.charset_encoding
-            if ctype.startswith("text/plain"):
-                return "", _squash(raw.decode(charset or "utf-8", "replace"))
-            return html_text(raw, charset)
-        raise UserError("重定向次数过多")
+
+    def on_headers(resp):
+        if resp.status >= 400:
+            raise UserError(f"网页返回 {resp.status}")
+        ctype = (resp.headers.get("Content-Type") or "").lower()
+        if not ctype.startswith(("text/html", "application/xhtml", "text/plain")):
+            raise UserError("不是网页（" + (ctype.split(";")[0] or "未知类型") + "）")
+
+    r = netfetch.fetch(url, max_bytes=PAGE_MAX, headers={"User-Agent": ua, "Accept": "text/html,text/plain;q=0.9"},
+                       connect_timeout=8, read_timeout=15, allow_private=ALLOW_PRIVATE, on_headers=on_headers)
+    ctype = (r.headers.get("Content-Type") or "").lower()
+    if ctype.startswith("text/plain"):
+        return "", _squash(r.body.decode(r.charset or "utf-8", "replace"))
+    return html_text(r.body, r.charset)
 
 
 _DROP = ("script", "style", "noscript", "template", "svg", "iframe", "form", "nav", "header", "footer", "aside", "button", "select")
@@ -165,7 +147,7 @@ def _read(item: dict) -> dict:
         item = dict(item, title=item.get("title") or title or item["url"], text=text[:PAGE_CHARS])
         if len(text) < SNIPPET_MIN:
             item["error"] = "没有读到正文"
-    except (UserError, httpx.HTTPError, OSError) as e:
+    except (UserError, httpx.HTTPError, OSError, http.client.HTTPException) as e:
         item = dict(item, error=str(e)[:80] or type(e).__name__)
     return item
 

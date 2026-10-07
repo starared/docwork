@@ -17,6 +17,8 @@ class TestPipeline(DBTestCase):
         import mock_llm
         from app import accounts, models_cfg, storage
         from app.worker import Worker
+        from app.pipeline import research
+        research.ALLOW_PRIVATE = True  # 模拟图库的图片在本机
         cls.srv, port = mock_llm.start()
         base = f"http://127.0.0.1:{port}/v1"
         e = models_cfg.save_endpoint({"kind": "openai", "name": "模拟", "base_url": base, "api_key": "test-key"})
@@ -38,6 +40,8 @@ class TestPipeline(DBTestCase):
             th.join(timeout=30)
         cls.srv.shutdown()
         import os
+        from app.pipeline import research
+        research.ALLOW_PRIVATE = False
         os.environ.pop("DW_HEAVY_GLOBAL", None)
         super().tearDownClass()
 

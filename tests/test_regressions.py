@@ -277,6 +277,80 @@ class TestRegressions(DBTestCase):
             finally:
                 for c in conns: c.close()
 
+    def test_xlsx_inplace_bad_unit_is_skipped(self):
+        from openpyxl import Workbook, load_workbook
+        from app.tools import inplace
+        src = self.tmp / "u.xlsx"
+        wb = Workbook(); wb.active.title = "表"; wb.active["A1"] = 1; wb.save(src)
+        dst = self.tmp / "u2.xlsx"
+        res = inplace.xlsx_apply(src, dst, [{"op": "set_cell", "unit": "表!A1:B2", "value": 5}, {"op": "set_cell", "unit": "无!A1", "value": 5},
+                                           {"op": "set_cell", "unit": "表!A1", "value": 7}])
+        self.assertEqual(res["applied"], 1)
+        self.assertEqual(len(res["skipped"]), 2)
+        self.assertEqual(load_workbook(dst)["表"]["A1"].value, 7)
+
+    def test_xls_plan_errors_are_fed_back(self):
+        import pandas as pd
+        from app.pipeline.xls import validate_plan
+        frames = {"销售": pd.DataFrame({"地区": ["a", "b"], "销售额": [1, 2]})}
+        ok = {"sheets": [{"source": "销售", "ops": [{"op": "group", "by": ["地区"], "aggs": [{"column": "销售额", "func": "sum"}]}]}]}
+        self.assertIs(validate_plan(frames, ok), ok)
+        for bad in ({"sheets": [{"source": "销售", "ops": [{"op": "sort", "by": "不存在的列"}]}]},
+                    {"sheets": [{"source": "销售", "ops": [{"op": "explode"}]}]},
+                    {"sheets": [{"source": "没有", "ops": []}]}, {"sheets": ["x"]}, {"sheets": [{"source": "销售", "ops": [{"op": "derive", "name": "n", "left": "销售额", "right": "abc"}]}]}):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                validate_plan(frames, bad)
+
+    def test_blob_rewritten_if_gc_removed_it(self):
+        """垃圾回收在"内容已存在"与"登记引用"之间删掉了文件：登记后发现文件不在时重新写入。"""
+        from unittest.mock import patch
+        from app import db, storage
+        data = b"gc-race-content"
+        sha, _ = storage.put_bytes(data)
+        blob = storage.blob_path(sha)
+        self.assertTrue(blob.exists())
+        real = db.run
+        def run_and_unlink(sql, args=(), conn=None):
+            n = real(sql, args, conn)
+            if sql.startswith("INSERT OR IGNORE INTO blobs"):
+                blob.unlink(missing_ok=True)  # 模拟 gc 恰好此时删掉文件
+            return n
+        with patch.object(storage.db, "run", run_and_unlink):
+            storage.put_bytes(data)
+        self.assertEqual(blob.read_bytes(), data)
+        src = self.tmp / "gc-src.bin"
+        src.write_bytes(data)
+        with patch.object(storage.db, "run", run_and_unlink):
+            storage.put_file(src, move=True)
+        self.assertEqual(blob.read_bytes(), data)
+        self.assertFalse(src.exists())
+
+    def test_gc_rechecks_references_before_deleting(self):
+        """快照之后新建的引用（例如新上传复用了旧内容）不会被误删。"""
+        from app import db, scheduler, storage, works
+        ws = "gc-ws"
+        data = b"old-content-reused"
+        sha, size = storage.put_bytes(data)
+        db.run("UPDATE blobs SET created_at=0 WHERE sha=?", (sha,))
+        real = scheduler._blob_refs
+        state = {"n": 0}
+        def refs_then_reference(conn):
+            r = real(conn)
+            if state["n"] == 0:
+                # 快照读完后，工作区才引用这个内容
+                storage.create_file_record(ws, sha, size, "reuse.bin", "upload")
+            state["n"] += 1
+            return r
+        from unittest.mock import patch
+        with patch.object(scheduler, "_blob_refs", refs_then_reference):
+            scheduler.gc_blobs(0)
+        self.assertTrue(storage.blob_path(sha).exists())
+        self.assertIsNotNone(db.one("SELECT 1 AS x FROM blobs WHERE sha=?", (sha,)))
+        db.run("UPDATE files SET deleted_at=1 WHERE sha=?", (sha,))
+        scheduler.gc_blobs(0)
+        self.assertFalse(storage.blob_path(sha).exists())
+        _ = works
+
     def test_upgrade_preserves_existing_versions(self):
         from app import db
         with tempfile.TemporaryDirectory() as temp:

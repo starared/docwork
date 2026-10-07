@@ -350,7 +350,6 @@ def _chart_png(spec: ChartSpec, theme: Theme, width_in: float, height_in: float,
 
 def _sankey(ax, spec: ChartSpec, colors, tc):
     """简化桑基图：两列或多列节点，按流量宽度绘制带状连线。"""
-    import numpy as np
     from matplotlib.patches import PathPatch
     from matplotlib.path import Path as MPath
 

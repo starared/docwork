@@ -4,7 +4,6 @@ PDF 转 PPT 的“重建”模式需要模型，由 AI 流程处理（任务类�
 """
 from __future__ import annotations
 
-import shutil
 from pathlib import Path
 from typing import Callable
 
@@ -112,7 +111,6 @@ def _pdf_docx(src, outdir, report, options, cancel, progress):
     out = outdir / f"{src.stem}.docx"
     with pdfplumber.open(src) as p:
         scanned = [i + 1 for i, pg in enumerate(p.pages) if len(pg.chars) <= 5]
-        n = len(p.pages)
     engine = options.get("engine", "auto")
     use_pdf2docx = engine in ("auto", "pdf2docx") and not scanned
     if use_pdf2docx:

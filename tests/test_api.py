@@ -469,6 +469,65 @@ class TestAPI(DBTestCase):
         self.assertEqual(o.get("/api/admin/usage").status_code, 200)
         self.assertEqual(o.get("/api/admin/audit").status_code, 200)
 
+    def test_json_body_size_limited(self):
+        """任意大的 JSON 请求体不会被整个读进内存：未登录的登录接口也适用。"""
+        c = self.client()
+        big = b'{"username": "' + b"a" * (3 * 1024 * 1024) + b'", "password": "x"}'
+        r = c.post("/api/login", content=big, headers={"Content-Type": "application/json"})
+        self.assertEqual(r.status_code, 413, r.text)
+        self.assertEqual(r.json()["code"], "too_large")
+        o = self.owner()
+        r = o.post("/api/admin/tokens", content=big, headers={"Content-Type": "application/json"})
+        self.assertEqual(r.status_code, 413)
+
+    def test_totp_reset_requires_current_code(self):
+        """已开启两步验证时，重新设置密钥必须验证当前验证码，与关闭时一致。"""
+        from app import db, security
+        o = self.owner()
+        secret = security.new_totp_secret()
+        db.run("UPDATE owner SET totp_secret=?, totp_enabled=1 WHERE id=1", (secret,))
+        try:
+            self.assertEqual(o.post("/api/owner/totp/setup", json={}).status_code, 400)
+            self.assertEqual(o.post("/api/owner/totp/setup", json={"code": "000000"}).status_code, 400)
+            self.assertEqual(db.one("SELECT totp_enabled FROM owner WHERE id=1")["totp_enabled"], 1, "失败的重置不能关闭两步验证")
+            r = o.post("/api/owner/totp/setup", json={"code": security.totp_now(secret)})
+            self.assertEqual(r.status_code, 200, r.text)
+            self.assertEqual(db.one("SELECT totp_enabled FROM owner WHERE id=1")["totp_enabled"], 0)
+        finally:
+            db.run("UPDATE owner SET totp_secret=NULL, totp_enabled=0 WHERE id=1")
+
+    def test_admin_upload_limit_applies_to_tokens(self):
+        """后台调整的单文件上传上限对令牌用户同样生效；令牌自己的上限只能更小。"""
+        from app import db
+        o = self.owner()
+        old = db.get_setting("max_upload_mb")
+        try:
+            self.assertEqual(o.put("/api/admin/settings", json={"max_upload_mb": 1}).status_code, 200)
+            g, _ = self.guest(o, note="上限")
+            self.assertEqual(g.post("/api/uploads", json={"name": "a.txt", "size": 2 * 1024 * 1024}).status_code, 413)
+            self.assertEqual(g.post("/api/uploads", json={"name": "a.txt", "size": 512 * 1024}).status_code, 200)
+            g2, _ = self.guest(o, note="更大", quota={"upload_mb": 50})
+            self.assertEqual(g2.post("/api/uploads", json={"name": "a.txt", "size": 2 * 1024 * 1024}).status_code, 413, "令牌上限不能超过后台上限")
+        finally:
+            if old is None:
+                db.run("DELETE FROM meta WHERE key='setting:max_upload_mb'")
+            else:
+                db.set_setting("max_upload_mb", old)
+
+    def test_bad_params_are_400_not_500(self):
+        o = self.owner()
+        for body in ({"kind": "convert", "params": {"target": "pdf"}}, {"kind": "ocr", "params": {}},
+                     {"kind": "pdf_tool", "params": {"op": "merge"}}, {"kind": "file_pages", "params": {}}):
+            r = o.post("/api/jobs", json=body)
+            self.assertEqual(r.status_code, 400, (body, r.text))
+        from app import works
+        wid = works.create_work(o.get("/api/me").json()["workspace_id"], "doc", "标签")
+        self.assertEqual(o.patch(f"/api/works/{wid}", json={"tags": 123}).status_code, 400)
+        self.assertEqual(o.patch(f"/api/works/{wid}", json={"tags": ["a", " b "]}).status_code, 200)
+        self.assertEqual(o.get(f"/api/works/{wid}").json()["tags"], ["a", "b"])
+        from app.scheduler import delete_work_hard
+        delete_work_hard(wid)  # 其他用例按作品数量断言
+
     def test_all_routes_require_auth(self):
         """越权测试：未登录访问所有需要登录的接口都应被拒绝。"""
         from starlette.routing import Route

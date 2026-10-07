@@ -63,8 +63,9 @@ export async function api(path, opts = {}) {
     throw new ApiError('网络连接失败，请检查网络后重试', 0, 'network');
   }
   if (r.status === 401 && !opts.allow401) {
+    // 会话失效：重新加载让 boot() 显示登录框（令牌链接的兑换流程除外）
     state.me = null;
-    if (!location.hash.startsWith('#/login') && !location.hash.includes('redeem=')) location.hash = '#/login';
+    if (!location.hash.includes('redeem=')) { location.hash = '#/'; location.reload(); }
     throw new ApiError('登录已失效，请重新登录', 401, 'unauthenticated');
   }
   const ct = r.headers.get('content-type') || '';

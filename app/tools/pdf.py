@@ -5,7 +5,6 @@ Ghostscript 负责压缩中的图片重采样。
 """
 from __future__ import annotations
 
-import io
 import re
 import shutil
 import zipfile

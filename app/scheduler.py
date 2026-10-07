@@ -127,14 +127,12 @@ def prune_previews() -> int:
     return n
 
 
-def gc_blobs(grace_hours: float = 24) -> tuple[int, int]:
-    """删除没有任何引用的内容（文件记录、版本文件、版本清单中的素材与预览缓存）。"""
-    import json
-
+def _blob_refs(conn) -> set[str]:
+    """所有仍被引用的内容哈希：文件记录、版本文件、版本清单中的导出、预览与素材、近期任务的参数与结果。"""
     refs: set[str] = set()
-    for r in db.all_("SELECT DISTINCT sha FROM files WHERE deleted_at IS NULL"):
+    for r in db.all_("SELECT DISTINCT sha FROM files WHERE deleted_at IS NULL", conn=conn):
         refs.add(r["sha"])
-    for r in db.all_("SELECT file_sha, manifest FROM versions"):
+    for r in db.all_("SELECT file_sha, manifest FROM versions", conn=conn):
         if r["file_sha"]:
             refs.add(r["file_sha"])
         m = db.jload(r["manifest"], {})
@@ -147,25 +145,47 @@ def gc_blobs(grace_hours: float = 24) -> tuple[int, int]:
         for a in (m.get("assets") or {}).values():
             if isinstance(a, dict) and a.get("sha"):
                 refs.add(a["sha"])
-    # 运行中任务的参数与结果中引用的内容
-    for r in db.all_("SELECT params, result FROM jobs WHERE status NOT IN ('done','failed','cancelled') OR finished_at > ?", (now() - 86400,)):
+    for r in db.all_("SELECT params, result FROM jobs WHERE status NOT IN ('done','failed','cancelled') OR finished_at > ?",
+                     (now() - 86400,), conn=conn):
         for txt in (r["params"] or "", r["result"] or ""):
             for tok in _shas(txt):
                 refs.add(tok)
+    return refs
+
+
+def gc_blobs(grace_hours: float = 24) -> tuple[int, int]:
+    """删除没有任何引用的内容（文件记录、版本文件、版本清单中的素材与预览缓存）。
+
+    引用集合是一次性读出的快照。删除每个内容前在写事务里再确认一次：文件表中没有新引用，
+    并且快照之后没有新建版本或任务（有则重新读取快照）。这样旧内容在快照与删除之间被新上传
+    去重复用时不会被误删。"""
+    conn = db.connect()
+    t0 = now()
+    refs = _blob_refs(conn)
     cutoff = now() - grace_hours * 3600
     removed = freed = 0
-    for b in db.all_("SELECT sha, size, created_at FROM blobs WHERE created_at < ?", (cutoff,)):
+    for b in db.all_("SELECT sha, size, created_at FROM blobs WHERE created_at < ?", (cutoff,), conn=conn):
         if b["sha"] in refs:
             continue
+        with db.tx(conn):
+            if conn.execute("SELECT 1 FROM files WHERE sha=? AND deleted_at IS NULL LIMIT 1", (b["sha"],)).fetchone():
+                continue
+            changed = conn.execute(
+                "SELECT 1 FROM versions WHERE created_at > ? UNION ALL SELECT 1 FROM jobs WHERE updated_at > ? LIMIT 1", (t0, t0)
+            ).fetchone()
+            if changed:
+                t0 = now()
+                refs = _blob_refs(conn)
+                if b["sha"] in refs:
+                    continue
+            conn.execute("DELETE FROM blobs WHERE sha=?", (b["sha"],))
         p = storage.blob_path(b["sha"])
         try:
             p.unlink(missing_ok=True)
         except OSError:
             continue
-        db.run("DELETE FROM blobs WHERE sha=?", (b["sha"],))
         removed += 1
         freed += b["size"]
-    _ = json
     return removed, freed
 
 

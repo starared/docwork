@@ -109,6 +109,8 @@ def work_update(req: Req):
     if req.b("folder") is not None:
         upd["folder"] = str(req.b("folder")).strip()[:60]
     if req.b("tags") is not None:
+        if not isinstance(req.b("tags"), list):
+            raise UserError("标签格式不正确")
         tags = [str(x).strip()[:20] for x in req.b("tags") if str(x).strip()][:20]
         upd["tags"] = tags
     if req.b("starred") is not None:

@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import time
 
-from pydantic import TypeAdapter, ValidationError
+from pydantic import TypeAdapter
 
 from .. import jobs
 from ..spec.document import PRESETS, Block, Document, document_text

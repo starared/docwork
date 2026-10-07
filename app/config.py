@@ -1,7 +1,6 @@
 """运行配置。所有配置来自环境变量（.env），资源配置档决定并发和内存上限。"""
 from __future__ import annotations
 
-import os
 from functools import lru_cache
 from pathlib import Path
 
@@ -121,6 +120,6 @@ def reset_settings() -> None:
 APP_DIR = Path(__file__).resolve().parent
 STATIC_DIR = APP_DIR.parent / "static"
 # 程序版本（发布时同步打 Git 标签 v版本号）
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.1.1"
 RENDERER_VERSION = "1.0.0"
 SPEC_VERSION = 1

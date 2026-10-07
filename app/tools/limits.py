@@ -143,8 +143,6 @@ def check_pdf(path: Path) -> int:
     max_pages = _limit("max_pages")
     try:
         with pikepdf.open(path) as pdf:
-            if pdf.is_encrypted:
-                pass
             n = len(pdf.pages)
             if len(pdf.objects) > 3_000_000:
                 raise UserError("PDF 对象数量异常，已拒绝处理", 413, "limits")

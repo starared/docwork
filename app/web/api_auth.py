@@ -70,9 +70,14 @@ def logout(req: Req):
 
 @api(auth="owner")
 def totp_setup(req: Req):
+    o = db.one("SELECT username, totp_secret, totp_enabled FROM owner WHERE id=1")
+    # 已开启时重新设置等同于先关闭：与关闭一样必须验证当前验证码，会话被盗用时不能无声地换掉密钥
+    if o["totp_enabled"] and not security.verify_totp(o["totp_secret"], str(req.b("code", "") or "")):
+        raise UserError("已开启两步验证，重新设置前请输入当前验证码")
     secret = security.new_totp_secret()
     db.run("UPDATE owner SET totp_secret=?, totp_enabled=0 WHERE id=1", (secret,))
-    o = db.one("SELECT username FROM owner WHERE id=1")
+    if o["totp_enabled"]:
+        accounts.audit(req.s, "totp_disabled", "", {"reason": "reset"}, req.ip)
     return {"secret": secret, "uri": security.totp_uri(secret, o["username"])}
 
 

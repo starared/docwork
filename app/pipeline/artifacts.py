@@ -4,7 +4,6 @@
 """
 from __future__ import annotations
 
-import shutil
 from pathlib import Path
 
 from .. import storage
@@ -12,7 +11,7 @@ from ..config import RENDERER_VERSION
 from ..render.charts import chart_data_xlsx
 from ..spec.common import Theme
 from ..spec.deck import Deck
-from ..spec.document import Document, document_text
+from ..spec.document import Document
 from ..spec.workbook import Workbook
 from ..tools import office, ooxml
 from ..tools import pdf as pdftools

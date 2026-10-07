@@ -221,8 +221,9 @@ def duplicate_to(work_id: str, workspace_id: str) -> str:
                 renderer_version=v["renderer_version"], file_sha=v["file_sha"], manifest=_strip_file_ids(v["manifest"]),
                 title=w["title"], search_text=version_search_text(v))
     if v["file_sha"]:
-        # 导入作品：原件也复制一份记录
-        storage.create_file_record(workspace_id, v["file_sha"], 0, w["title"], "original", work_id=nid)
+        # 导入作品：原件也复制一份记录（大小取内容库中的真实值，否则工作区用量会把它算成另一份内容）
+        blob = db.one("SELECT size FROM blobs WHERE sha=?", (v["file_sha"],))
+        storage.create_file_record(workspace_id, v["file_sha"], int(blob["size"]) if blob else 0, w["title"], "original", work_id=nid)
     return nid
 
 

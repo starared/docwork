@@ -7,7 +7,7 @@ from pathlib import Path
 from .. import db, storage, works
 from ..tools import inplace, limits, office, ooxml
 from ..tools import pdf as pdftools
-from ..util import UserError, safe_filename, stable_hash
+from ..util import UserError, safe_filename
 from . import prompts
 from .context import Ctx
 

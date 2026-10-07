@@ -1,8 +1,8 @@
 """Web 层公共部分：鉴权装饰器、CSRF、请求上下文、文件响应。"""
 from __future__ import annotations
 
+import hmac
 import json
-import mimetypes
 import urllib.parse
 from dataclasses import dataclass, field
 from functools import wraps
@@ -19,6 +19,8 @@ from ..util import UserError
 SESSION_COOKIE = "dw_session"
 CSRF_COOKIE = "dw_csrf"
 MUTATING = {"POST", "PUT", "PATCH", "DELETE"}
+# JSON 请求体上限。文件内容走分片上传接口，不经过这里；大纲、修改操作等 JSON 远小于此值。
+MAX_JSON_BODY = 2 * 1024 * 1024
 
 
 @dataclass
@@ -98,14 +100,14 @@ def api(auth: str | None = "any", csrf: bool = True, raw_body: bool = False, per
                     scope.require(perm)
                 if request.method in MUTATING and csrf and scope is not None:
                     tok = request.headers.get("x-csrf-token", "")
-                    if not tok or tok != scope.csrf:
+                    if not tok or not hmac.compare_digest(tok, scope.csrf):
                         raise UserError("请求校验失败，请刷新页面后重试", 403, "csrf")
                 body = None
                 if raw_body:
                     body = request
                 elif request.method in MUTATING:
                     ct = request.headers.get("content-type", "")
-                    data = await request.body()
+                    data = await read_body(request)
                     if data:
                         if "application/json" not in ct:
                             raise UserError("请求格式必须是 JSON", 415, "content_type")
@@ -131,6 +133,22 @@ def api(auth: str | None = "any", csrf: bool = True, raw_body: bool = False, per
         endpoint._api = True  # type: ignore[attr-defined]
         return endpoint
     return deco
+
+
+async def read_body(request: Request, limit: int = MAX_JSON_BODY) -> bytes:
+    """按上限流式读取请求体：Uvicorn 不限制请求体大小，不能把任意大的请求整个读进内存。"""
+    try:
+        declared = int(request.headers.get("content-length") or 0)
+    except ValueError:
+        declared = 0
+    if declared > limit:
+        raise UserError("请求内容过大", 413, "too_large")
+    buf = bytearray()
+    async for chunk in request.stream():
+        buf.extend(chunk)
+        if len(buf) > limit:
+            raise UserError("请求内容过大", 413, "too_large")
+    return bytes(buf)
 
 
 def _call(fn, req):

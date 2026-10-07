@@ -152,7 +152,6 @@ class LLM:
                     _set_cap(ep, "json_mode", False)
                     continue
                 if e.drop_stream_opts:
-                    stream_opts_ok = False
                     body.pop("stream_options", None)
                     if stream:
                         try:
@@ -161,7 +160,6 @@ class LLM:
                             return text
                         except _Retry as e2:
                             last_err = str(e2)
-                    _ = stream_opts_ok
                 time.sleep(min(30, 2 ** (attempt + 1)))
         raise LLMError(f"模型接口调用失败：{last_err}")
 
@@ -411,16 +409,27 @@ class LLM:
             return []
 
     def download(self, url: str, max_bytes: int = IMAGE_MAX) -> bytes:
+        """下载图库或模型返回的图片地址。地址来自外部（模型输出可能受用户提示词影响），
+        只允许公网地址，并固定连接到校验过的 IP，与网页抓取使用同一套检查。"""
+        import http.client
+
+        from .pipeline import research
+        from .tools import netfetch
+
         if not str(url).lower().startswith(("https://", "http://")):
             raise LLMError("图片地址无效")
-        with _client(60) as c, c.stream("GET", url) as r:
-            r.raise_for_status()
-            try:
-                if int(r.headers.get("content-length") or 0) > max_bytes:
-                    raise LLMError("图片过大")
-            except ValueError:
-                pass
-            return _read_limited(r, max_bytes)
+        try:
+            r = netfetch.fetch(str(url), max_bytes=max_bytes, headers={"User-Agent": "DocWork/1.0"},
+                               connect_timeout=15, read_timeout=60, allow_private=research.ALLOW_PRIVATE)
+        except UserError as e:
+            raise LLMError(f"图片地址被拒绝：{e.message}")
+        except (OSError, http.client.HTTPException) as e:
+            raise LLMError(f"图片下载失败：{type(e).__name__}")
+        if r.status >= 400:
+            raise LLMError(f"图片下载失败（{r.status}）")
+        if r.truncated:
+            raise LLMError("图片过大")
+        return r.body
 
 
 class _Retry(Exception):

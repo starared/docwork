@@ -10,7 +10,7 @@ from starlette.responses import StreamingResponse
 
 from .. import accounts, db, jobs, models_cfg, quota, works
 from ..tools import convert as convmod
-from ..util import UserError, dumps, new_id, now
+from ..util import UserError, new_id
 from .common import SESSION_COOKIE, Req, api, disk_blocked, page_args
 
 # 任务类型 → (所需权限, 预估 token)
@@ -98,6 +98,10 @@ def create_job(s: accounts.Scope, kind: str, params: dict, work_id: str | None =
     for key in ("file_id", "logo_file_id", "theme_file_id"):
         if p.get(key):
             p[key] = _files_in_scope(s, [p[key]])[0]
+    if kind in ("convert", "ocr", "file_pages", "import_file") and not p.get("file_id"):
+        raise UserError("请选择文件")
+    if kind == "pdf_tool" and not p.get("file_ids"):
+        raise UserError("请选择 PDF 文件")
     title = TITLES[kind]
     if kind in ("gen_ppt", "gen_doc", "gen_xls"):
         if "urls" in p:

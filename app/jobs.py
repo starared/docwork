@@ -39,7 +39,7 @@ KIND_QUEUE: dict[str, str] = {
 }
 HEAVY_QUEUES = {"render", "convert", "ocr", "preview"}
 # 修改同一作品的任务需串行执行
-SERIAL_KINDS = ("edit", "import_edit", "manual_edit", "restore", "rebuild")
+SERIAL_KINDS = ("edit", "import_edit", "manual_edit", "rebuild")
 ACTIVE = ("queued", "running", "cancelling", "awaiting_input")
 FINAL = ("done", "failed", "cancelled")
 

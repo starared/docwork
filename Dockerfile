@@ -39,7 +39,6 @@ RUN python -c "from rapidocr_onnxruntime import RapidOCR; RapidOCR(); print('Rap
 
 COPY app ./app
 COPY static ./static
-COPY tests ./tests
 
 RUN useradd --uid 1000 --create-home --home-dir /home/docwork docwork \
     && mkdir -p /data && chown docwork:docwork /data

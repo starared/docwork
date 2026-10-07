@@ -6,7 +6,6 @@
 """
 from __future__ import annotations
 
-import copy
 import io
 import re
 from dataclasses import dataclass, field
@@ -87,7 +86,6 @@ def render_document(doc: Document, out: Path, assets: dict[str, Path] | None = N
 
     for b in doc.blocks:
         t = b.type
-        start = len(d.element.body)
         if t == "heading":
             p = d.add_paragraph(style=f"Heading {b.level}")
             _inline(p, b.text, cfg, res, heading=True, level=b.level)
@@ -209,7 +207,6 @@ def render_document(doc: Document, out: Path, assets: dict[str, Path] | None = N
                 pf.first_line_indent = Cm(-0.9)
                 pf.left_indent = Cm(0.9)
                 _inline(p, f"[{i}] {item}", cfg, res)
-        _ = start
 
     _header_footer(d, doc, cfg, assets, tmp)
     _update_fields_on_open(d)

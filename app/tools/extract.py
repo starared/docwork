@@ -1,10 +1,8 @@
 """资料抽取：把上传文件转成带结构的文字（Markdown），并收集图片素材。用于生成时的资料和重建。"""
 from __future__ import annotations
 
-import io
 from pathlib import Path
 
-from .. import storage
 
 
 def extract(path: Path, kind: str, workdir: Path, cancel=None, progress=None, with_images: bool = True) -> dict:

@@ -86,7 +86,7 @@ def load_data(ctx: Ctx, file_ids: list[str]) -> tuple[dict[str, pd.DataFrame], l
                 path = office.normalize_to_ooxml(path, ctx.tmp / "norm", cancel=ctx.cancelled) if kind != "xlsm" else path
             for name, df in pd.read_excel(path, sheet_name=None).items():
                 if not df.empty:
-                    frames[f"{stem}_{name}"[:28] if len(frames) or True else name] = df
+                    frames[f"{stem}_{name}"[:28]] = df
         else:
             others.append(fid)
     return frames, others
@@ -212,17 +212,8 @@ def plan_from_data(ctx: Ctx, frames: dict[str, pd.DataFrame]) -> tuple[dict, str
     p = ctx.p
     user = f"用户要求：{p.get('topic', '')}\n\n<资料>\n{_schema(frames)}\n</资料>"
 
-    def validate(d):
-        if not isinstance(d, dict) or not isinstance(d.get("sheets"), list):
-            raise ValueError("需要 sheets 数组")
-        for s in d["sheets"]:
-            src = s.get("source")
-            if src not in frames:
-                raise ValueError(f"数据表 {src} 不存在，可用：{', '.join(frames)}")
-            run_ops(frames[src].copy(), s.get("ops") or [])
-        return d
     ctx.progress(0.2, "制定分析方案")
-    plan = ctx.llm.json("planner", prompts.XLS_PLAN, user, validate=validate, stream=True, max_tokens=4000)
+    plan = ctx.llm.json("planner", prompts.XLS_PLAN, user, validate=lambda d: validate_plan(frames, d), stream=True, max_tokens=4000)
     sheets = []
     for name, df in frames.items():
         cut = df.head(MAX_DATA_ROWS)
@@ -236,6 +227,25 @@ def plan_from_data(ctx: Ctx, frames: dict[str, pd.DataFrame]) -> tuple[dict, str
                           [[f"{s.get('name')}：{s.get('note', '')}"] for s in plan["sheets"] if s.get("note")],
                           "freeze_header": False, "autofilter": False})
     return {"title": plan.get("title") or p.get("topic", "")[:30] or "数据分析", "sheets": sheets}, summary
+
+
+def validate_plan(frames: dict[str, pd.DataFrame], d) -> dict:
+    """检查模型给出的分析方案：数据表存在、每一步操作都能在真实数据上执行。
+    写错列名等问题由 pandas 抛出 KeyError 等各种异常，统一转成 ValueError 反馈给模型修正，而不是让任务失败。"""
+    if not isinstance(d, dict) or not isinstance(d.get("sheets"), list):
+        raise ValueError("需要 sheets 数组")
+    for s in d["sheets"]:
+        if not isinstance(s, dict):
+            raise ValueError("sheets 中的每一项都要是对象")
+        src = s.get("source")
+        if src not in frames:
+            raise ValueError(f"数据表 {src} 不存在，可用：{', '.join(frames)}")
+        try:
+            run_ops(frames[src].copy(), s.get("ops") or [])
+        except Exception as e:  # pandas 的 KeyError / TypeError / UserError 等
+            msg = e.message if isinstance(e, UserError) else f"{type(e).__name__}: {str(e)[:200]}"
+            raise ValueError(f"数据表 {src} 的操作无法执行：{msg}")
+    return d
 
 
 # ---------- 无数据：直接设计 ----------

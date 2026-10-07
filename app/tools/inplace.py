@@ -142,7 +142,7 @@ def pptx_apply(src: Path, dst: Path, ops: list[dict]) -> dict:
                 structural.append(op)
             else:
                 skipped.append(f"不支持的操作 {k}")
-        except (KeyError, IndexError, ValueError, AttributeError) as e:
+        except (KeyError, IndexError, ValueError, AttributeError, TypeError) as e:
             skipped.append(f"{op.get('unit') or op.get('index')}：{type(e).__name__}")
     # 结构操作按页码从大到小执行，避免序号错位
     lst = prs.slides._sldIdLst
@@ -374,7 +374,8 @@ def xlsx_apply(src: Path, dst: Path, ops: list[dict]) -> dict:
                     continue
             ws[cell] = v
             applied += 1
-        except (KeyError, ValueError) as e:
+        except (KeyError, ValueError, AttributeError, TypeError) as e:
+            # 区域地址（如 A1:B2）、不存在的工作表、非法值：跳过这一条，不让整个任务失败
             skipped.append(f"{uid}：{type(e).__name__}")
     wb.save(dst)
     return {"applied": applied, "skipped": skipped}

@@ -129,8 +129,9 @@ def check_upload(token_id: str | None, workspace_id: str, size: int, *, pending:
 
     s = get_settings()
     q = token_quota(token_id)
-    limit_mb = min(q.get("upload_mb") or s.max_upload_mb, s.max_upload_mb) if token_id else s.max_upload_mb
-    limit_mb = int(db.get_setting("max_upload_mb", limit_mb)) if not token_id else limit_mb
+    # 后台调整的上限对所有人生效；令牌自己的上限只能在此基础上再收紧
+    max_mb = int(db.get_setting("max_upload_mb", s.max_upload_mb))
+    limit_mb = min(int(q.get("upload_mb") or max_mb), max_mb) if token_id else max_mb
     if size > limit_mb * 1024 * 1024:
         raise UserError(f"文件超过大小上限（{limit_mb} MB）", 413, "too_large")
     if q.get("storage_mb") is not None:

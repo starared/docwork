@@ -186,7 +186,6 @@ def redeem(plain: str) -> tuple[str, dict]:
 
 
 def revoke_token(token_id: str) -> None:
-    from . import jobs
 
     conn = db.connect()
     with db.tx(conn):

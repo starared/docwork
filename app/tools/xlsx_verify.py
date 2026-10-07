@@ -11,7 +11,7 @@ import re
 from pathlib import Path
 
 from openpyxl import load_workbook
-from openpyxl.utils import column_index_from_string, get_column_letter, range_boundaries
+from openpyxl.utils import column_index_from_string, get_column_letter
 
 from ..spec.workbook import Workbook
 from . import office, ooxml

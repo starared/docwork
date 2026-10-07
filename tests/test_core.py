@@ -239,10 +239,6 @@ class TestJobsAndQuota(DBTestCase):
         self.assertEqual(u["tokens"], 40000 + 150)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class TestHardening(DBTestCase):
     def _req(self, peer, headers=None):
         from starlette.requests import Request
@@ -306,14 +302,89 @@ class TestHardening(DBTestCase):
                 pass
         srv = ThreadingHTTPServer(("127.0.0.1", 0), H)
         threading.Thread(target=srv.serve_forever, daemon=True).start()
+        from app.pipeline import research
         try:
             llm = LLM({"id": "t", "params": {}, "workspace_id": "w", "token_id": None}, lambda: None, lambda t: None)
             base = f"http://127.0.0.1:{srv.server_address[1]}"
-            with self.assertRaises(LLMError):
+            # 图片地址与网页抓取同样只允许公网地址
+            with self.assertRaises(LLMError) as e:
                 llm.download(base + "/stream", max_bytes=2 * 1024 * 1024)
+            self.assertIn("内网", str(e.exception))
+            research.ALLOW_PRIVATE = True
+            with self.assertRaises(LLMError) as e:
+                llm.download(base + "/stream", max_bytes=2 * 1024 * 1024)
+            self.assertIn("过大", str(e.exception))
             with self.assertRaises(LLMError):
                 llm.download(base + "/len", max_bytes=2 * 1024 * 1024)
             with self.assertRaises(LLMError):
                 llm.download("file:///etc/passwd")
         finally:
+            research.ALLOW_PRIVATE = False
             srv.shutdown()
+
+    def test_netfetch_pins_and_limits(self):
+        """抓取：逐跳重定向、内网拦截、大小上限、以原域名发送 Host。"""
+        import threading
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+        from app.tools import netfetch
+        from app.util import UserError
+        seen = {}
+
+        class H(BaseHTTPRequestHandler):
+            def do_GET(self):
+                seen["host"] = self.headers.get("Host")
+                if self.path == "/r":
+                    self.send_response(302)
+                    self.send_header("Location", "/ok")
+                    self.end_headers()
+                    return
+                if self.path == "/loop":
+                    self.send_response(302)
+                    self.send_header("Location", "/loop")
+                    self.end_headers()
+                    return
+                body = b"x" * 3000
+                self.send_response(200)
+                self.send_header("Content-Type", "text/plain; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *a):
+                pass
+        srv = ThreadingHTTPServer(("127.0.0.1", 0), H)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        port = srv.server_address[1]
+        try:
+            with self.assertRaises(UserError):
+                netfetch.fetch(f"http://localhost:{port}/ok", max_bytes=10000)
+            r = netfetch.fetch(f"http://localhost:{port}/r", max_bytes=10000, allow_private=True)
+            self.assertEqual((r.status, len(r.body), r.truncated, r.charset), (200, 3000, False, "utf-8"))
+            self.assertTrue(r.url.endswith("/ok"))
+            self.assertEqual(seen["host"], f"localhost:{port}", "Host 头用原域名，不用解析出的 IP")
+            r = netfetch.fetch(f"http://127.0.0.1:{port}/ok", max_bytes=1000, allow_private=True)
+            self.assertTrue(r.truncated)
+            with self.assertRaises(UserError):
+                netfetch.fetch(f"http://127.0.0.1:{port}/loop", max_bytes=1000, allow_private=True)
+            with self.assertRaises(UserError):
+                netfetch.fetch("ftp://example.com/x", max_bytes=10)
+        finally:
+            srv.shutdown()
+
+    def test_sandbox_limits_applied_without_preexec(self):
+        """资源限制由 limited.py 在 exec 前设置；找不到程序时报出明确错误。"""
+        import sys
+        from app.config import get_settings
+        from app.tools import sandbox
+        r = sandbox.run([sys.executable, "-c", "import resource,os;print(resource.getrlimit(resource.RLIMIT_FSIZE)[0], os.getpgid(0)==os.getpid())"],
+                        get_settings().tmp_dir, timeout=30)
+        fsize, own_group = r.stdout.split()
+        self.assertEqual(int(fsize), get_settings().max_job_tmp_mb * 1024 * 1024)
+        self.assertEqual(own_group, "True", "外部程序在独立进程组中运行")
+        with self.assertRaises(sandbox.ToolError) as e:
+            sandbox.run(["definitely-not-a-program-xyz"], get_settings().tmp_dir, timeout=30)
+        self.assertIn("找不到程序", str(e.exception))
+
+
+if __name__ == "__main__":
+    unittest.main()

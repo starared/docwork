@@ -4,13 +4,12 @@
 """
 from __future__ import annotations
 
-import copy
 from typing import Any
 
 from ..util import UserError, new_id
-from .deck import Deck, Slide
+from .deck import Deck
 from .document import Document
-from .workbook import Sheet, Workbook
+from .workbook import Workbook
 
 
 class OpError(UserError):

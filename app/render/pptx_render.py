@@ -5,7 +5,6 @@
 """
 from __future__ import annotations
 
-import io
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -16,12 +15,12 @@ from pptx.dml.color import RGBColor
 from pptx.enum.shapes import MSO_CONNECTOR, MSO_SHAPE
 from pptx.enum.text import MSO_ANCHOR, MSO_AUTO_SIZE, PP_ALIGN
 from pptx.oxml.ns import qn
-from pptx.util import Emu, Inches, Pt
+from pptx.util import Emu, Pt
 
 from ..spec.common import ChartSpec, ImageRef, TableSpec
 from ..spec.deck import Deck, Slide
 from .charts import add_native_chart, chart_png
-from .fonts import fit_text, measurer
+from .fonts import measurer
 from .icons import add_icon
 from .theme import contrast, ensure_contrast, heading_color, hex_rgb, mix, normalize_theme, on_color
 
@@ -451,7 +450,7 @@ def L_toc(r: SlideRenderer, c: dict):
 
 def L_section(r: SlideRenderer, c: dict):
     t = r.t
-    W, H = r.W, r.H
+    W = r.W
     r.background(t.primary)
     fg = on_color(t.primary)
     r.rect(W * 0.62, -1.0, W * 0.6, W * 0.6, mix(t.primary, "#FFFFFF", 0.1), shape=MSO_SHAPE.OVAL)
@@ -525,7 +524,7 @@ def L_cards(r: SlideRenderer, c: dict):
 def L_quote(r: SlideRenderer, c: dict):
     t = r.t
     r.background(t.surface)
-    W, H = r.W, r.H
+    W = r.W
     r.text("_mark", r.mx, 0.9, 2, 1.8, "“", size=120, min_size=60, bold=True, color=mix(t.accent, t.surface, 0.2), font="Georgia", role="decor", fixed=True)
     r.text("title", r.mx, 0.45, W - 2 * r.mx, 0.6, r.s.title, size=18, min_size=14, color=t.muted, role="title")
     r.text("content.quote", 1.4, 2.0, W - 2.8, 3.0, c["quote"], size=32, min_size=18, bold=True, color=heading_color(t), align="center", anchor="middle", font=t.heading_font, line_spacing=1.3)

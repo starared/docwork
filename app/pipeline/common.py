@@ -8,7 +8,7 @@ from .. import db, models_cfg, storage, works
 from ..config import RENDERER_VERSION, SPEC_VERSION
 from ..tools import extract as extract_mod
 from ..tools import limits
-from ..util import UserError, estimate_tokens, stable_hash
+from ..util import UserError, estimate_tokens
 from . import prompts
 from .context import Ctx
 

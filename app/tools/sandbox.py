@@ -1,17 +1,18 @@
 """外部程序（LibreOffice、Ghostscript、OCR、Pandoc）的受控执行。
 
 - 独立进程组：取消或超时时结束整个进程组。
-- 资源限制：虚拟内存、CPU 时间、单文件大小（RLIMIT）。
+- 资源限制：虚拟内存、CPU 时间、单文件大小（RLIMIT），由单线程的 limited.py 在 exec 目标程序前设置
+  （worker 是多线程进程，不使用 Popen 的 preexec_fn）。
 - 可选 bubblewrap：无网络、系统只读、只能写任务目录（需要容器允许用户命名空间；不可用时自动退回）。
 - 生产部署中，重负载 worker 容器本身位于无外网的内部网络，且根文件系统只读。
 """
 from __future__ import annotations
 
 import os
-import resource
 import shutil
 import signal
 import subprocess
+import sys
 import time
 from dataclasses import dataclass
 from functools import lru_cache
@@ -59,22 +60,12 @@ def effective_mode() -> str:
     return "rlimit"
 
 
-def _limits(mem_mb: int, cpu_s: int, fsize_mb: int):
-    def apply():
-        os.setsid()
-        try:
-            if mem_mb:
-                lim = mem_mb * 1024 * 1024
-                resource.setrlimit(resource.RLIMIT_AS, (lim, lim))
-            if cpu_s:
-                resource.setrlimit(resource.RLIMIT_CPU, (cpu_s, cpu_s + 5))
-            if fsize_mb:
-                f = fsize_mb * 1024 * 1024
-                resource.setrlimit(resource.RLIMIT_FSIZE, (f, f))
-            resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
-        except (ValueError, OSError):
-            pass
-    return apply
+_LIMITED = str(Path(__file__).with_name("limited.py"))
+
+
+def _limited(mem_mb: int, cpu_s: int, fsize_mb: int, cmd: Sequence[str]) -> list[str]:
+    """用 limited.py 包一层：在单线程子进程里设置 RLIMIT 后 exec 目标程序。"""
+    return [sys.executable, "-I", _LIMITED, str(mem_mb), str(cpu_s), str(fsize_mb), "--", *cmd]
 
 
 def run(
@@ -94,7 +85,7 @@ def run(
     # 虚拟内存上限取进程内存上限的 3 倍：LibreOffice 等程序会预留大量虚拟地址空间，
     # 实际物理内存由容器内存上限约束，这里只防止失控进程。
     mem = (mem_mb or s.proc_mem_limit_mb) * 3
-    full = list(cmd)
+    full = _limited(mem, timeout + 30, s.max_job_tmp_mb, cmd)
     mode = s.sandbox
     if mode in ("auto", "bwrap") and bwrap_available():
         wr = [str(Path(cwd).resolve())] + [str(Path(p).resolve()) for p in writable]
@@ -117,9 +108,9 @@ def run(
     with open(out_f, "wb") as fo, open(err_f, "wb") as fe:
         try:
             p = subprocess.Popen(full, cwd=str(cwd), stdout=fo, stderr=fe, stdin=subprocess.DEVNULL, env=penv,
-                                 preexec_fn=_limits(mem, timeout + 30, s.max_job_tmp_mb))
+                                 start_new_session=True)
         except FileNotFoundError:
-            raise ToolError(f"找不到程序：{cmd[0]}")
+            raise ToolError(f"找不到程序：{full[0]}")
         reason = None
         while True:
             try:
@@ -143,6 +134,8 @@ def run(
         raise ToolCancelled("已取消")
     if reason == "timeout":
         raise ToolError(f"{Path(cmd[0]).name} 运行超时（{timeout} 秒），已结束进程")
+    if p.returncode == 127 and "DOCWORK_ENOENT" in stderr:
+        raise ToolError(f"找不到程序：{cmd[0]}")
     if check and p.returncode != 0:
         raise ToolError(f"{Path(cmd[0]).name} 执行失败（退出码 {p.returncode}）：{(stderr or stdout)[-800:]}")
     return Result(p.returncode, stdout, stderr, dt)
