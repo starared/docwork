@@ -1,5 +1,10 @@
 # 更新记录
 
+## 未发布
+
+### 其他
+- 新增 Dependabot：GitHub Actions 每周、Python 依赖和 Docker 基础镜像每月检查更新，同类更新合并成一个 PR，合并前由 CI 验证。CI 用到的 Actions 现在还是 Node 20 版本，会由第一批 Dependabot PR 升级。
+
 ## 1.1.3（2026-10-07）
 
 测试与持续集成的补充，不改变功能。
