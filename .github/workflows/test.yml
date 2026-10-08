@@ -21,9 +21,9 @@ jobs:
       DW_SANDBOX: rlimit
       SAL_USE_VCLPLUGIN: svp
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
           cache: pip
@@ -60,9 +60,9 @@ jobs:
       DW_SANDBOX: rlimit
       SAL_USE_VCLPLUGIN: svp
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
           cache: pip
@@ -89,7 +89,7 @@ jobs:
 
       - name: 上传截图和日志
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: e2e-screenshots
           path: ${{ runner.temp }}/e2e_shots
@@ -100,13 +100,13 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
 
       # 构建镜像并加载到本机 Docker；层缓存放在 GitHub Actions 缓存里，Dockerfile 不变时第二次只需几十秒
       - name: 构建镜像
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           load: true
