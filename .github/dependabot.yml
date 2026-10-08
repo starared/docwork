@@ -1,0 +1,25 @@
+# 依赖更新：GitHub Actions 每周检查，Python 依赖和 Docker 基础镜像每月检查。
+# 同类更新合并成一个 PR，避免一次来一堆；合并前 CI（单元、e2e、Docker 冒烟测试）会先跑一遍。
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 3
+    groups:
+      python-deps:
+        patterns: ["*"]
+
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: monthly
