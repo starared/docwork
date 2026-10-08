@@ -2,4 +2,4 @@
 # RapidOCR：中文 OCR 效果优于 Tesseract（模型随包提供，ONNX Runtime 推理）
 rapidocr_onnxruntime>=1.3.24,<2
 # pdf2docx：文字型 PDF 转 Word 的首选后端（依赖 PyMuPDF，AGPL 许可；已停止积极维护，作为可替换组件）
-pdf2docx>=0.5.8
+pdf2docx>=0.5.13
